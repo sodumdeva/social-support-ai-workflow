@@ -173,15 +173,19 @@ def show_application_form():
         
         with col2:
             emirates_id = st.text_input("Emirates ID", placeholder="XXX-XXXX-XXXXXXX-X")
+        
+        st.markdown("### Employment Information")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
             employment_status = st.selectbox(
                 "Employment Status",
-                ["unemployed", "employed", "self_employed", "student", "retired"]
+                ["employed", "unemployed", "self_employed", "retired", "student"]
             )
-            employment_duration = st.number_input("Employment Duration (months)", min_value=0, value=0)
-            education_level = st.selectbox(
-                "Education Level",
-                ["no_education", "primary", "secondary", "bachelor", "master", "phd"]
-            )
+        
+        with col2:
+            pass
         
         st.markdown("### Financial Information")
         
@@ -189,26 +193,9 @@ def show_application_form():
         
         with col1:
             monthly_income = st.number_input("Monthly Income (AED)", min_value=0.0, value=0.0, step=100.0)
-            housing_type = st.selectbox(
-                "Housing Type",
-                ["rented", "owned", "family_house", "shared"]
-            )
-            monthly_rent = st.number_input("Monthly Rent (AED)", min_value=0.0, value=0.0, step=100.0)
         
         with col2:
             family_size = st.number_input("Family Size", min_value=1, value=1)
-            dependents = st.number_input("Number of Dependents", min_value=0, value=0)
-            previous_applications = st.number_input("Previous Applications", min_value=0, value=0)
-        
-        st.markdown("### Additional Information")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            has_medical_conditions = st.checkbox("Has Medical Conditions")
-        
-        with col2:
-            has_criminal_record = st.checkbox("Has Criminal Record")
         
         submitted = st.form_submit_button("Submit Application", use_container_width=True)
         
@@ -225,19 +212,17 @@ def show_application_form():
                     "emirates_id": emirates_id if emirates_id else None,
                     "monthly_income": monthly_income,
                     "employment_status": employment_status,
-                    "employment_duration_months": employment_duration,
-                    "family_size": family_size,
-                    "number_of_dependents": dependents,
-                    "housing_type": housing_type,
-                    "monthly_rent": monthly_rent,
-                    "education_level": education_level,
-                    "has_medical_conditions": has_medical_conditions,
-                    "has_criminal_record": has_criminal_record,
-                    "previous_applications": previous_applications
+                    "family_size": family_size
                 }
                 
                 # Submit application
-                submit_application(application_data)
+                st.session_state.submitted_data = application_data
+                st.session_state.form_submitted = True
+    
+    # Handle form submission outside of form context
+    if hasattr(st.session_state, 'form_submitted') and st.session_state.form_submitted:
+        submit_application(st.session_state.submitted_data)
+        st.session_state.form_submitted = False
 
 
 def submit_application(application_data):
@@ -266,10 +251,7 @@ def submit_application(application_data):
                 for step in result['next_steps']:
                     st.write(f"• {step}")
                 
-                # Option to upload documents
-                if st.button("📄 Upload Documents"):
-                    st.session_state.show_upload = True
-                    st.rerun()
+                st.info("💡 You can now check the application status or use the Quick Demo to see AI processing in action!")
                 
             else:
                 st.error(f"Failed to submit application: {response.text}")
@@ -406,49 +388,40 @@ def show_demo_page():
             demo_data = {
                 "first_name": "Ahmed",
                 "last_name": "Al-Mansouri",
-                "email": "ahmed.almansouri@email.com",
-                "monthly_income": 2500,
-                "employment_status": "unemployed",
-                "family_size": 5,
-                "number_of_dependents": 3,
-                "housing_type": "rented",
-                "monthly_rent": 2000,
-                "education_level": "secondary",
-                "has_medical_conditions": True
+                "email": "ahmed.mansouri@example.com",
+                "phone": "+971501234567",
+                "emirates_id": "784-1990-1234567-1",
+                "monthly_income": 3500.0,
+                "employment_status": "employed",
+                "family_size": 4
             }
             process_demo_application(demo_data, "Large Family Scenario")
     
     with col2:
-        if st.button("🎓 Young Graduate", use_container_width=True):
+        if st.button("🎓 Young Professional", use_container_width=True):
             demo_data = {
                 "first_name": "Fatima",
-                "last_name": "Al-Zahra",
-                "email": "fatima.alzahra@email.com",
-                "monthly_income": 1800,
-                "employment_status": "unemployed",
-                "family_size": 1,
-                "number_of_dependents": 0,
-                "housing_type": "shared",
-                "monthly_rent": 1200,
-                "education_level": "bachelor",
-                "has_medical_conditions": False
+                "last_name": "Hassan",
+                "email": "fatima.hassan@example.com",
+                "phone": "+971509876543", 
+                "emirates_id": "784-1995-9876543-2",
+                "monthly_income": 6500.0,
+                "employment_status": "employed",
+                "family_size": 1
             }
-            process_demo_application(demo_data, "Young Graduate Scenario")
+            process_demo_application(demo_data, "Young Professional Scenario")
     
     with col3:
         if st.button("👴 Senior Citizen", use_container_width=True):
             demo_data = {
-                "first_name": "Hassan",
-                "last_name": "Al-Mahmoud",
-                "email": "hassan.mahmoud@email.com",
-                "monthly_income": 1200,
+                "first_name": "Mohammed",
+                "last_name": "Ali",
+                "email": "mohammed.ali@example.com",
+                "phone": "+971555123456",
+                "emirates_id": "784-1960-5555555-3", 
+                "monthly_income": 1200.0,
                 "employment_status": "retired",
-                "family_size": 2,
-                "number_of_dependents": 0,
-                "housing_type": "owned",
-                "monthly_rent": 0,
-                "education_level": "primary",
-                "has_medical_conditions": True
+                "family_size": 2
             }
             process_demo_application(demo_data, "Senior Citizen Scenario")
 

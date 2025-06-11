@@ -7,6 +7,7 @@ Provides REST API endpoints for:
 - Application processing
 - Status checking
 - Results retrieval
+- Machine Learning model operations
 """
 import os
 import uuid
@@ -29,6 +30,13 @@ from src.models.database import get_db, Application, Document
 from src.agents.master_orchestrator import MasterOrchestrator
 from src.data.synthetic_data import SyntheticDataGenerator
 
+# Import ML endpoints
+try:
+    from .ml_endpoints import router as ml_router
+    ML_ENDPOINTS_AVAILABLE = True
+except ImportError:
+    ML_ENDPOINTS_AVAILABLE = False
+    print("Warning: ML endpoints not available")
 
 # Pydantic models for API
 class ApplicationData(BaseModel):
@@ -39,15 +47,8 @@ class ApplicationData(BaseModel):
     emirates_id: Optional[str] = None
     monthly_income: Optional[float] = None
     employment_status: Optional[str] = None
-    employment_duration_months: Optional[int] = None
     family_size: int = 1
-    number_of_dependents: int = 0
-    housing_type: Optional[str] = None
-    monthly_rent: Optional[float] = None
-    education_level: Optional[str] = None
-    has_medical_conditions: bool = False
-    has_criminal_record: bool = False
-    previous_applications: int = 0
+    # Removed fields that don't exist in database model
 
 
 class ProcessApplicationRequest(BaseModel):
@@ -73,7 +74,7 @@ class ProcessingResult(BaseModel):
 # Initialize FastAPI app
 app = FastAPI(
     title="Social Support AI Workflow API",
-    description="AI-powered social support application processing system",
+    description="AI-powered social support application processing system with ML models",
     version="1.0.0"
 )
 
@@ -86,6 +87,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include ML endpoints router if available
+if ML_ENDPOINTS_AVAILABLE:
+    app.include_router(ml_router)
+
 # Initialize agents
 orchestrator = MasterOrchestrator()
 synthetic_generator = SyntheticDataGenerator()
@@ -94,18 +99,46 @@ synthetic_generator = SyntheticDataGenerator()
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
+    
+    endpoints = {
+        "submit_application": "/applications/submit",
+        "upload_documents": "/applications/{application_id}/documents",
+        "process_application": "/applications/{application_id}/process",
+        "get_status": "/applications/{application_id}/status",
+        "get_results": "/applications/{application_id}/results",
+        "generate_synthetic": "/testing/generate-synthetic-data"
+    }
+    
+    # Add ML endpoints if available
+    if ML_ENDPOINTS_AVAILABLE:
+        endpoints.update({
+            "ml_status": "/ml/status",
+            "ml_train": "/ml/train", 
+            "ml_predict_eligibility": "/ml/predict/eligibility",
+            "ml_predict_risk": "/ml/predict/risk",
+            "ml_predict_support": "/ml/predict/support-amount",
+            "ml_detect_fraud": "/ml/predict/fraud",
+            "ml_match_programs": "/ml/predict/programs",
+            "ml_comprehensive": "/ml/predict/comprehensive",
+            "ml_models": "/ml/models",
+            "ml_evaluate": "/ml/evaluate"
+        })
+    
     return {
-        "message": "Social Support AI Workflow API",
+        "message": "Social Support AI Workflow API with ML Models",
         "version": "1.0.0",
         "status": "running",
-        "endpoints": {
-            "submit_application": "/applications/submit",
-            "upload_documents": "/applications/{application_id}/documents",
-            "process_application": "/applications/{application_id}/process",
-            "get_status": "/applications/{application_id}/status",
-            "get_results": "/applications/{application_id}/results",
-            "generate_synthetic": "/testing/generate-synthetic-data"
-        }
+        "ml_models_available": ML_ENDPOINTS_AVAILABLE,
+        "endpoints": endpoints,
+        "features": [
+            "Document processing and data extraction",
+            "Multi-modal AI agent orchestration", 
+            "Real-time eligibility assessment",
+            "Economic enablement recommendations",
+            "Scikit-learn ML classification models",
+            "Fraud detection and risk assessment",
+            "Interactive chat interface support"
+        ]
     }
 
 
@@ -129,15 +162,7 @@ async def submit_application(
             emirates_id=application_data.emirates_id,
             monthly_income=application_data.monthly_income,
             employment_status=application_data.employment_status,
-            employment_duration_months=application_data.employment_duration_months,
             family_size=application_data.family_size,
-            number_of_dependents=application_data.number_of_dependents,
-            housing_type=application_data.housing_type,
-            monthly_rent=application_data.monthly_rent,
-            education_level=application_data.education_level,
-            has_medical_conditions=application_data.has_medical_conditions,
-            has_criminal_record=application_data.has_criminal_record,
-            previous_applications=application_data.previous_applications,
             status="submitted"
         )
         
@@ -253,15 +278,7 @@ async def process_application(
         application_data = {
             "monthly_income": application.monthly_income,
             "employment_status": application.employment_status,
-            "employment_duration_months": application.employment_duration_months,
-            "family_size": application.family_size,
-            "number_of_dependents": application.number_of_dependents,
-            "housing_type": application.housing_type,
-            "monthly_rent": application.monthly_rent,
-            "education_level": application.education_level,
-            "has_medical_conditions": application.has_medical_conditions,
-            "has_criminal_record": application.has_criminal_record,
-            "previous_applications": application.previous_applications
+            "family_size": application.family_size
         }
         
         # Prepare document data for processing
@@ -381,15 +398,7 @@ async def process_application_with_data(
             emirates_id=request.application_data.emirates_id,
             monthly_income=request.application_data.monthly_income,
             employment_status=request.application_data.employment_status,
-            employment_duration_months=request.application_data.employment_duration_months,
             family_size=request.application_data.family_size,
-            number_of_dependents=request.application_data.number_of_dependents,
-            housing_type=request.application_data.housing_type,
-            monthly_rent=request.application_data.monthly_rent,
-            education_level=request.application_data.education_level,
-            has_medical_conditions=request.application_data.has_medical_conditions,
-            has_criminal_record=request.application_data.has_criminal_record,
-            previous_applications=request.application_data.previous_applications,
             status="processing"
         )
         

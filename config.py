@@ -1,13 +1,14 @@
 """
-Configuration management for Social Support AI Workflow
+Configuration settings for Social Support AI Workflow
 """
 import os
 from typing import Optional
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """Application settings with environment variable support"""
+    """Application settings using Pydantic BaseSettings"""
     
     # Application
     app_name: str = Field(default="Social Support AI Workflow", env="APP_NAME")
@@ -15,10 +16,7 @@ class Settings(BaseSettings):
     debug: bool = Field(default=True, env="DEBUG")
     
     # Database
-    database_url: str = Field(
-        default="postgresql://social_support_user:password@localhost:5432/social_support_db",
-        env="DATABASE_URL"
-    )
+    database_url: str = Field(default="sqlite:///./social_support_ai.db", env="DATABASE_URL")
     
     # Ollama Configuration
     ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")

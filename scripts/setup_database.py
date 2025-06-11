@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.models.database import create_tables, engine
 from config import settings
 from loguru import logger
+from sqlalchemy.sql import text
 
 def setup_database():
     """Initialize the database with all necessary tables"""
@@ -27,7 +28,7 @@ def setup_database():
         
         # Verify connection
         with engine.connect() as connection:
-            result = connection.execute("SELECT 1")
+            result = connection.execute(text("SELECT 1"))
             logger.success("Database connection verified!")
         
         return True

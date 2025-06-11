@@ -1,12 +1,12 @@
 """
 Eligibility Assessment Agent for Social Support AI Workflow
 
-Evaluates social support applications based on:
-- Financial need assessment (income, expenses, family size)
-- Risk factors (employment stability, credit history)
-- Demographics (family composition, housing situation)
-- Eligibility criteria compliance
-- Support amount calculation
+Evaluates social support applications using:
+- ML-based eligibility classification (Random Forest)
+- Risk assessment (Gradient Boosting)
+- Support amount prediction (Multi-class Classification)
+- Fraud detection (Isolation Forest + SVM)
+- Rule-based validation as fallback
 """
 from typing import Dict, Any, List, Optional
 import json
@@ -14,14 +14,36 @@ from datetime import datetime
 
 from .base_agent import BaseAgent
 
+# Import ML models
+try:
+    from ..models.ml_models import SocialSupportMLModels
+    ML_MODELS_AVAILABLE = True
+except ImportError:
+    ML_MODELS_AVAILABLE = False
+    print("Warning: ML models not available, falling back to rule-based assessment")
+
 
 class EligibilityAssessmentAgent(BaseAgent):
-    """Agent specialized in assessing eligibility for social support programs"""
+    """Agent specialized in assessing eligibility using ML models + rule-based fallback"""
     
     def __init__(self):
         super().__init__("EligibilityAssessmentAgent")
         
-        # Define eligibility criteria weights
+        # Initialize ML models if available
+        if ML_MODELS_AVAILABLE:
+            self.ml_models = SocialSupportMLModels()
+            self.use_ml_models = True
+            # Try to load pre-trained models
+            try:
+                self.ml_models.load_models()
+            except Exception as e:
+                print(f"Could not load pre-trained models: {e}")
+                self.use_ml_models = False
+        else:
+            self.ml_models = None
+            self.use_ml_models = False
+        
+        # Define eligibility criteria weights (for fallback)
         self.eligibility_weights = {
             "financial_need": 0.35,      # 35% - Primary factor
             "family_composition": 0.25,   # 25% - Family size, dependents
@@ -41,16 +63,15 @@ class EligibilityAssessmentAgent(BaseAgent):
         
         # Support amount calculation parameters
         self.support_calculation = {
-            "base_amount": 1000,          # Base support amount AED
-            "per_family_member": 300,     # Additional AED per family member
-            "maximum_support": 4000,      # Maximum monthly support AED
-            "housing_supplement": 500,    # Additional for high housing costs
-            "medical_supplement": 200     # Additional for medical conditions
+            "base_amount": 1000,          # Base monthly support
+            "per_dependent": 300,         # Additional per dependent
+            "housing_adjustment": 0.3,    # 30% adjustment for housing costs
+            "maximum_support": 5000       # Maximum monthly support
         }
     
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Assess eligibility for social support
+        Process eligibility assessment using ML models with rule-based fallback
         
         Args:
             input_data: {
@@ -60,24 +81,50 @@ class EligibilityAssessmentAgent(BaseAgent):
             }
             
         Returns:
-            Dictionary with eligibility assessment results
+            Complete eligibility assessment with ML predictions
         """
         application_data = input_data.get("application_data", {})
         extracted_documents = input_data.get("extracted_documents", {})
         application_id = input_data.get("application_id", "unknown")
         
         try:
-            # Perform comprehensive eligibility assessment
-            assessment_result = await self._perform_eligibility_assessment(
-                application_data, extracted_documents
-            )
+            # Primary assessment using ML models
+            if self.use_ml_models:
+                assessment_result = await self._perform_ml_eligibility_assessment(
+                    application_data, extracted_documents
+                )
+            else:
+                # Fallback to rule-based assessment
+                assessment_result = await self._perform_rule_based_eligibility_assessment(
+                    application_data, extracted_documents
+                )
             
             # Calculate support amount if eligible
             if assessment_result["eligible"]:
-                support_calculation = await self._calculate_support_amount(
-                    application_data, extracted_documents, assessment_result
-                )
-                assessment_result["support_calculation"] = support_calculation
+                if self.use_ml_models:
+                    # Use ML model for support amount prediction
+                    ml_support = self.ml_models.predict_support_amount(
+                        application_data, extracted_documents
+                    )
+                    if "error" not in ml_support:
+                        assessment_result["support_calculation"] = {
+                            "monthly_support_amount": ml_support["estimated_amount"],
+                            "support_bracket": ml_support["support_bracket"],
+                            "confidence": ml_support["confidence"],
+                            "method": "ml_prediction"
+                        }
+                    else:
+                        # Fallback to rule-based calculation
+                        support_calculation = await self._calculate_support_amount_rules(
+                            application_data, extracted_documents, assessment_result
+                        )
+                        assessment_result["support_calculation"] = support_calculation
+                else:
+                    # Rule-based support calculation
+                    support_calculation = await self._calculate_support_amount_rules(
+                        application_data, extracted_documents, assessment_result
+                    )
+                    assessment_result["support_calculation"] = support_calculation
             
             # Generate detailed reasoning
             reasoning = await self._generate_assessment_reasoning(
@@ -90,6 +137,7 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "assessment_result": assessment_result,
                 "reasoning": reasoning,
                 "assessed_at": datetime.utcnow().isoformat(),
+                "assessment_method": "ml_based" if self.use_ml_models else "rule_based",
                 "status": "success"
             }
             
@@ -102,12 +150,87 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "assessed_at": datetime.utcnow().isoformat()
             }
     
-    async def _perform_eligibility_assessment(
+    async def _perform_ml_eligibility_assessment(
         self, 
         application_data: Dict[str, Any], 
         extracted_documents: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Perform comprehensive eligibility assessment"""
+        """
+        Perform ML-based eligibility assessment using multiple models
+        
+        Returns:
+            Comprehensive assessment results from ML models
+        """
+        
+        # 1. Eligibility Classification
+        eligibility_prediction = self.ml_models.predict_eligibility(
+            application_data, extracted_documents
+        )
+        
+        # 2. Risk Assessment
+        risk_prediction = self.ml_models.predict_risk_level(
+            application_data, extracted_documents
+        )
+        
+        # 3. Fraud Detection
+        fraud_detection = self.ml_models.detect_fraud(
+            application_data, extracted_documents
+        )
+        
+        # 4. Economic Program Matching
+        program_matching = self.ml_models.match_economic_programs(
+            application_data, extracted_documents
+        )
+        
+        # Combine ML predictions for final eligibility decision
+        if "error" in eligibility_prediction:
+            # Fallback to rule-based if ML fails
+            return await self._perform_rule_based_eligibility_assessment(
+                application_data, extracted_documents
+            )
+        
+        # Check for fraud flags
+        is_high_fraud_risk = (
+            fraud_detection.get("risk_level") == "high" or
+            fraud_detection.get("fraud_probability", 0) > 0.8
+        )
+        
+        # Override eligibility if fraud detected
+        final_eligible = (
+            eligibility_prediction["eligible"] and 
+            not is_high_fraud_risk and
+            risk_prediction.get("risk_level") != "high"
+        )
+        
+        # Calculate confidence score
+        confidence_factors = [
+            eligibility_prediction.get("confidence", 0.5),
+            1.0 - fraud_detection.get("fraud_probability", 0.5),
+            0.8 if risk_prediction.get("risk_level") == "low" else 0.5
+        ]
+        overall_confidence = sum(confidence_factors) / len(confidence_factors)
+        
+        return {
+            "eligible": final_eligible,
+            "total_score": eligibility_prediction.get("probability_eligible", 0.5),
+            "confidence": overall_confidence,
+            "ml_predictions": {
+                "eligibility": eligibility_prediction,
+                "risk": risk_prediction,
+                "fraud": fraud_detection,
+                "programs": program_matching
+            },
+            "assessment_method": "ml_ensemble",
+            "feature_importance": eligibility_prediction.get("feature_importance", {}),
+            "override_reasons": []
+        }
+    
+    async def _perform_rule_based_eligibility_assessment(
+        self, 
+        application_data: Dict[str, Any], 
+        extracted_documents: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Fallback rule-based eligibility assessment (original implementation)"""
         
         # Calculate individual assessment components
         financial_assessment = self._assess_financial_need(application_data, extracted_documents)
@@ -147,7 +270,8 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "demographics": demographics_assessment
             },
             "hard_constraints": hard_constraints,
-            "confidence": min(0.95, max(0.6, total_score))  # Confidence based on score
+            "confidence": min(0.95, max(0.6, total_score)),  # Confidence based on score
+            "assessment_method": "rule_based"
         }
     
     def _assess_financial_need(
@@ -373,13 +497,13 @@ class EligibilityAssessmentAgent(BaseAgent):
             "violations": violations
         }
     
-    async def _calculate_support_amount(
+    async def _calculate_support_amount_rules(
         self, 
         application_data: Dict[str, Any], 
         extracted_documents: Dict[str, Any],
         assessment_result: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Calculate appropriate support amount"""
+        """Calculate appropriate support amount using rule-based logic"""
         
         base_amount = self.support_calculation["base_amount"]
         family_size = application_data.get("family_size", 1)
@@ -387,29 +511,24 @@ class EligibilityAssessmentAgent(BaseAgent):
         has_medical_conditions = application_data.get("has_medical_conditions", False)
         
         # Base calculation
-        family_supplement = (family_size - 1) * self.support_calculation["per_family_member"]
+        family_supplement = (family_size - 1) * self.support_calculation["per_dependent"]
         
         # Housing supplement for high rent
         housing_supplement = 0
         monthly_income = application_data.get("monthly_income", 1)
         if monthly_rent / monthly_income > 0.4:  # High rent burden
-            housing_supplement = self.support_calculation["housing_supplement"]
+            housing_supplement = self.support_calculation["housing_adjustment"] * monthly_rent
         
         # Medical supplement
         medical_supplement = 0
         if has_medical_conditions:
-            medical_supplement = self.support_calculation["medical_supplement"]
+            medical_supplement = self.support_calculation["housing_adjustment"] * monthly_rent
         
         # Calculate total
         total_support = base_amount + family_supplement + housing_supplement + medical_supplement
         
-        # Apply eligibility score modifier
-        eligibility_score = assessment_result["total_score"]
-        score_modifier = min(1.0, eligibility_score / 0.8)  # Scale based on score
-        adjusted_support = total_support * score_modifier
-        
         # Cap at maximum
-        final_support = min(adjusted_support, self.support_calculation["maximum_support"])
+        final_support = min(total_support, self.support_calculation["maximum_support"])
         
         return {
             "monthly_support_amount": round(final_support, 2),
@@ -419,7 +538,6 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "housing_supplement": housing_supplement,
                 "medical_supplement": medical_supplement,
                 "subtotal": total_support,
-                "eligibility_modifier": round(score_modifier, 3),
                 "final_amount": round(final_support, 2)
             },
             "support_duration_months": 6,  # Standard 6-month support period
