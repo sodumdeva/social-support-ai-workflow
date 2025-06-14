@@ -46,18 +46,20 @@ def main():
     page = st.sidebar.selectbox(
         "Choose a page:",
         [
+            "💬 Chat Application",  # Make chat the first option
             "🏠 Home",
             "📝 Submit Application", 
             "📋 Application Status",
             "🔄 Quick Demo",
             "📊 Analytics",
-            "💬 Chat Assistant",
             "🧪 Testing Tools"
         ]
     )
     
     # Route to different pages
-    if page == "🏠 Home":
+    if page == "💬 Chat Application":
+        show_chat_application_page()
+    elif page == "🏠 Home":
         show_home_page()
     elif page == "📝 Submit Application":
         show_application_form()
@@ -67,14 +69,12 @@ def main():
         show_demo_page()
     elif page == "📊 Analytics":
         show_analytics_page()
-    elif page == "💬 Chat Assistant":
-        show_chat_page()
     elif page == "🧪 Testing Tools":
         show_testing_page()
 
 
 def show_home_page():
-    """Display home page with system overview"""
+    """Display home page with system overview and interactive buttons"""
     
     st.markdown("## System Overview")
     
@@ -88,6 +88,99 @@ def show_home_page():
     
     with col3:
         st.metric("Documents Supported", "5 types", "Multimodal AI")
+    
+    st.markdown("---")
+    
+    # Quick start section with prominent buttons
+    st.markdown("## 🚀 Get Started")
+    st.markdown("Choose how you'd like to apply for social support:")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 💬 **Recommended: Chat Application**")
+        st.markdown("Interactive conversation with AI assistant")
+        st.markdown("✅ Step-by-step guidance")
+        st.markdown("✅ Real-time document processing")
+        st.markdown("✅ Instant feedback")
+        
+        if st.button("🤖 Start Chat Application", use_container_width=True, type="primary"):
+            st.session_state.page = "💬 Chat Application"
+            st.rerun()
+    
+    with col2:
+        st.markdown("### 📝 **Traditional: Form Application**")
+        st.markdown("Fill out a structured form")
+        st.markdown("✅ All information at once")
+        st.markdown("✅ Familiar interface")
+        st.markdown("✅ Quick submission")
+        
+        if st.button("📋 Fill Application Form", use_container_width=True):
+            st.session_state.page = "📝 Submit Application"
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Demo section
+    st.markdown("## 🔄 Try a Demo First")
+    st.markdown("Not sure how it works? Try our demo scenarios:")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("👨‍👩‍👧‍👦 Large Family Demo", use_container_width=True):
+            # Auto-run large family demo
+            demo_data = {
+                "name": "Ahmed Al Mansouri",
+                "emirates_id": "784-1990-1234567-1",
+                "employment_status": "unemployed",
+                "monthly_income": 800,
+                "family_size": 6,
+                "housing_status": "rented",
+                "monthly_rent": 2500,
+                "has_medical_conditions": True,
+                "number_of_dependents": 4
+            }
+            st.session_state.demo_data = demo_data
+            st.session_state.demo_name = "Large Family Demo"
+            st.session_state.page = "🔄 Quick Demo"
+            st.rerun()
+    
+    with col2:
+        if st.button("🏖️ Retired Person Demo", use_container_width=True):
+            demo_data = {
+                "name": "Fatima Al Zahra",
+                "emirates_id": "784-1955-2345678-2",
+                "employment_status": "retired",
+                "monthly_income": 1200,
+                "family_size": 2,
+                "housing_status": "rented",
+                "monthly_rent": 1800,
+                "has_medical_conditions": False,
+                "number_of_dependents": 1
+            }
+            st.session_state.demo_data = demo_data
+            st.session_state.demo_name = "Retired Person Demo"
+            st.session_state.page = "🔄 Quick Demo"
+            st.rerun()
+    
+    with col3:
+        if st.button("💼 Professional Demo", use_container_width=True):
+            demo_data = {
+                "name": "Omar Al Rashid",
+                "emirates_id": "784-1980-4567890-4",
+                "employment_status": "employed",
+                "monthly_income": 15000,
+                "family_size": 4,
+                "housing_status": "owned",
+                "monthly_rent": 0,
+                "has_medical_conditions": False,
+                "number_of_dependents": 2
+            }
+            st.session_state.demo_data = demo_data
+            st.session_state.demo_name = "Professional Demo"
+            st.session_state.page = "🔄 Quick Demo"
+            st.rerun()
     
     st.markdown("---")
     
@@ -134,29 +227,29 @@ def show_home_page():
     
     st.markdown("---")
     
-    # Quick actions
-    st.markdown("## 🚀 Quick Actions")
+    # Additional quick actions
+    st.markdown("## 🛠️ Additional Tools")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📝 Submit New Application", use_container_width=True):
-            st.session_state.page = "📝 Submit Application"
+        if st.button("📋 Check Application Status", use_container_width=True):
+            st.session_state.page = "📋 Application Status"
             st.rerun()
     
     with col2:
-        if st.button("🔄 Try Quick Demo", use_container_width=True):
-            st.session_state.page = "🔄 Quick Demo"
+        if st.button("📊 View Analytics", use_container_width=True):
+            st.session_state.page = "📊 Analytics"
             st.rerun()
     
     with col3:
-        if st.button("🧪 Generate Test Data", use_container_width=True):
+        if st.button("🧪 Testing Tools", use_container_width=True):
             st.session_state.page = "🧪 Testing Tools"
             st.rerun()
 
 
 def show_application_form():
-    """Display application submission form"""
+    """Display application submission form with interactive buttons"""
     
     st.markdown("## 📝 Submit Social Support Application")
     
@@ -185,7 +278,9 @@ def show_application_form():
             )
         
         with col2:
-            pass
+            # Add employment duration if employed
+            if employment_status in ["employed", "self_employed"]:
+                employment_duration = st.number_input("Employment Duration (months)", min_value=0, value=0)
         
         st.markdown("### Financial Information")
         
@@ -197,32 +292,84 @@ def show_application_form():
         with col2:
             family_size = st.number_input("Family Size", min_value=1, value=1)
         
+        # Add housing information
+        st.markdown("### Housing Information")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            housing_status = st.selectbox(
+                "Housing Status",
+                ["owned", "rented", "family", "other"]
+            )
+        
+        with col2:
+            if housing_status == "rented":
+                monthly_rent = st.number_input("Monthly Rent (AED)", min_value=0.0, value=0.0, step=100.0)
+            else:
+                monthly_rent = 0.0
+        
+        # Additional information
+        st.markdown("### Additional Information")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            has_medical_conditions = st.checkbox("Do you have any medical conditions requiring ongoing treatment?")
+        
+        with col2:
+            number_of_dependents = st.number_input("Number of Dependents", min_value=0, value=0)
+        
         submitted = st.form_submit_button("Submit Application", use_container_width=True)
         
         if submitted:
+            # Validate required fields
             if not first_name or not last_name:
-                st.error("Please fill in required fields (First Name, Last Name)")
-            else:
-                # Prepare application data
-                application_data = {
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "email": email if email else None,
-                    "phone": phone if phone else None,
-                    "emirates_id": emirates_id if emirates_id else None,
-                    "monthly_income": monthly_income,
-                    "employment_status": employment_status,
-                    "family_size": family_size
-                }
-                
-                # Submit application
-                st.session_state.submitted_data = application_data
-                st.session_state.form_submitted = True
+                st.error("Please fill in all required fields (marked with *)")
+                return
+            
+            application_data = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "name": f"{first_name} {last_name}",
+                "email": email,
+                "phone": phone,
+                "emirates_id": emirates_id,
+                "employment_status": employment_status,
+                "monthly_income": monthly_income,
+                "family_size": family_size,
+                "housing_status": housing_status,
+                "monthly_rent": monthly_rent,
+                "has_medical_conditions": has_medical_conditions,
+                "number_of_dependents": number_of_dependents
+            }
+            
+            # Add employment duration if applicable
+            if employment_status in ["employed", "self_employed"]:
+                application_data["employment_duration_months"] = employment_duration
+            
+            submit_application(application_data)
     
-    # Handle form submission outside of form context
-    if hasattr(st.session_state, 'form_submitted') and st.session_state.form_submitted:
-        submit_application(st.session_state.submitted_data)
-        st.session_state.form_submitted = False
+    # Quick action buttons below the form
+    st.markdown("---")
+    st.markdown("### 🚀 Quick Actions")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("💬 Use Chat Interface Instead", use_container_width=True):
+            st.session_state.page = "💬 Chat Application"
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 Try Demo Application", use_container_width=True):
+            st.session_state.page = "🔄 Quick Demo"
+            st.rerun()
+    
+    with col3:
+        if st.button("📋 Check Application Status", use_container_width=True):
+            st.session_state.page = "📋 Application Status"
+            st.rerun()
 
 
 def submit_application(application_data):
@@ -373,57 +520,156 @@ def show_application_results(application_id):
 
 
 def show_demo_page():
-    """Display quick demo page"""
+    """Display demo page with preset scenarios and interactive buttons"""
     
     st.markdown("## 🔄 Quick Demo")
-    st.markdown("Experience the AI workflow with pre-filled data")
+    st.markdown("Try the system with pre-configured scenarios to see how it works.")
     
-    # Demo scenarios
-    st.markdown("### Choose a Demo Scenario")
+    # Check if demo data was passed from home page
+    if hasattr(st.session_state, 'demo_data') and hasattr(st.session_state, 'demo_name'):
+        st.info(f"🎯 Running demo: **{st.session_state.demo_name}**")
+        
+        # Auto-process the demo
+        with st.spinner("Processing demo application..."):
+            process_demo_application(st.session_state.demo_data, st.session_state.demo_name)
+        
+        # Clear the demo data
+        del st.session_state.demo_data
+        del st.session_state.demo_name
+        
+        st.markdown("---")
+    
+    # Demo scenario buttons
+    st.markdown("### 📋 Select a Demo Scenario:")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### ✅ Likely Approved Scenarios")
+        
+        if st.button("👨‍👩‍👧‍👦 Large Family, Low Income", use_container_width=True, key="demo_approved_1"):
+            demo_data = {
+                "name": "Ahmed Al Mansouri",
+                "emirates_id": "784-1990-1234567-1",
+                "employment_status": "unemployed",
+                "monthly_income": 800,
+                "family_size": 6,
+                "housing_status": "rented",
+                "monthly_rent": 2500,
+                "has_medical_conditions": True,
+                "number_of_dependents": 4
+            }
+            process_demo_application(demo_data, "Large Family, Low Income")
+        
+        if st.button("🏖️ Retired with Pension", use_container_width=True, key="demo_approved_2"):
+            demo_data = {
+                "name": "Fatima Al Zahra",
+                "emirates_id": "784-1955-2345678-2",
+                "employment_status": "retired",
+                "monthly_income": 1200,
+                "family_size": 2,
+                "housing_status": "rented",
+                "monthly_rent": 1800,
+                "has_medical_conditions": False,
+                "number_of_dependents": 1
+            }
+            process_demo_application(demo_data, "Retired with Pension")
+        
+        if st.button("🤱 Single Parent", use_container_width=True, key="demo_approved_3"):
+            demo_data = {
+                "name": "Mariam Hassan",
+                "emirates_id": "784-1985-3456789-3",
+                "employment_status": "unemployed",
+                "monthly_income": 0,
+                "family_size": 3,
+                "housing_status": "family",
+                "monthly_rent": 0,
+                "has_medical_conditions": False,
+                "number_of_dependents": 2
+            }
+            process_demo_application(demo_data, "Single Parent")
+    
+    with col2:
+        st.markdown("#### ❌ Likely Declined Scenarios")
+        
+        if st.button("💼 High Income Professional", use_container_width=True, key="demo_declined_1"):
+            demo_data = {
+                "name": "Omar Al Rashid",
+                "emirates_id": "784-1980-4567890-4",
+                "employment_status": "employed",
+                "monthly_income": 15000,
+                "family_size": 4,
+                "housing_status": "owned",
+                "monthly_rent": 0,
+                "has_medical_conditions": False,
+                "number_of_dependents": 2
+            }
+            process_demo_application(demo_data, "High Income Professional")
+        
+        if st.button("🏢 Successful Business Owner", use_container_width=True, key="demo_declined_2"):
+            demo_data = {
+                "name": "Khalid Al Maktoum",
+                "emirates_id": "784-1975-5678901-5",
+                "employment_status": "self_employed",
+                "monthly_income": 25000,
+                "family_size": 3,
+                "housing_status": "owned",
+                "monthly_rent": 0,
+                "has_medical_conditions": False,
+                "number_of_dependents": 1
+            }
+            process_demo_application(demo_data, "Successful Business Owner")
+        
+        if st.button("👨‍🎓 Young Professional", use_container_width=True, key="demo_declined_3"):
+            demo_data = {
+                "name": "Ali Al Nasser",
+                "emirates_id": "784-1995-6789012-6",
+                "employment_status": "employed",
+                "monthly_income": 8000,
+                "family_size": 1,
+                "housing_status": "rented",
+                "monthly_rent": 3000,
+                "has_medical_conditions": False,
+                "number_of_dependents": 0
+            }
+            process_demo_application(demo_data, "Young Professional")
+    
+    # Custom demo option
+    st.markdown("---")
+    st.markdown("### 🎛️ Custom Demo")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("💬 Try Interactive Chat Demo", use_container_width=True):
+            st.session_state.page = "💬 Chat Application"
+            st.rerun()
+    
+    with col2:
+        if st.button("📝 Create Custom Application", use_container_width=True):
+            st.session_state.page = "📝 Submit Application"
+            st.rerun()
+    
+    # Navigation buttons
+    st.markdown("---")
+    st.markdown("### 🧭 Navigation")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("👨‍👩‍👧‍👦 Large Family", use_container_width=True):
-            demo_data = {
-                "first_name": "Ahmed",
-                "last_name": "Al-Mansouri",
-                "email": "ahmed.mansouri@example.com",
-                "phone": "+971501234567",
-                "emirates_id": "784-1990-1234567-1",
-                "monthly_income": 3500.0,
-                "employment_status": "employed",
-                "family_size": 4
-            }
-            process_demo_application(demo_data, "Large Family Scenario")
+        if st.button("🏠 Back to Home", use_container_width=True):
+            st.session_state.page = "🏠 Home"
+            st.rerun()
     
     with col2:
-        if st.button("🎓 Young Professional", use_container_width=True):
-            demo_data = {
-                "first_name": "Fatima",
-                "last_name": "Hassan",
-                "email": "fatima.hassan@example.com",
-                "phone": "+971509876543", 
-                "emirates_id": "784-1995-9876543-2",
-                "monthly_income": 6500.0,
-                "employment_status": "employed",
-                "family_size": 1
-            }
-            process_demo_application(demo_data, "Young Professional Scenario")
+        if st.button("💬 Start Real Application", use_container_width=True):
+            st.session_state.page = "💬 Chat Application"
+            st.rerun()
     
     with col3:
-        if st.button("👴 Senior Citizen", use_container_width=True):
-            demo_data = {
-                "first_name": "Mohammed",
-                "last_name": "Ali",
-                "email": "mohammed.ali@example.com",
-                "phone": "+971555123456",
-                "emirates_id": "784-1960-5555555-3", 
-                "monthly_income": 1200.0,
-                "employment_status": "retired",
-                "family_size": 2
-            }
-            process_demo_application(demo_data, "Senior Citizen Scenario")
+        if st.button("📋 Check Status", use_container_width=True):
+            st.session_state.page = "📋 Application Status"
+            st.rerun()
 
 
 def process_demo_application(demo_data, scenario_name):
@@ -592,63 +838,144 @@ def show_analytics_page():
     st.plotly_chart(fig, use_container_width=True)
 
 
-def show_chat_page():
-    """Display chat assistant page"""
+def show_chat_application_page():
+    """Display the main chat-based application interface"""
     
-    st.markdown("## 💬 AI Chat Assistant")
-    st.info("Chat functionality would be implemented here with a conversational AI agent.")
+    # Import the chat interface
+    try:
+        from chat_interface import show_chat_interface
+        show_chat_interface()
+    except ImportError as e:
+        st.error(f"Chat interface not available: {str(e)}")
+        st.info("Using fallback chat implementation...")
+        show_fallback_chat_interface()
+
+
+def show_fallback_chat_interface():
+    """Fallback chat interface if the main one fails to load"""
     
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Hello! I'm here to help you with the social support application process. How can I assist you today?"}
+    st.markdown("## 🤖 Social Support AI Assistant")
+    st.markdown("I'll help you apply for social support through a conversational interface.")
+    
+    # Initialize session state for fallback
+    if "fallback_messages" not in st.session_state:
+        st.session_state.fallback_messages = [
+            {
+                "role": "assistant",
+                "content": "Hello! I'm your Social Support AI Assistant. I'll help you apply for financial support. What's your full name?"
+            }
         ]
     
-    # Display chat messages
-    for message in st.session_state.messages:
+    if "fallback_state" not in st.session_state:
+        st.session_state.fallback_state = {
+            "step": "name_collection",
+            "data": {}
+        }
+    
+    # Display messages
+    for message in st.session_state.fallback_messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
     # Chat input
-    if prompt := st.chat_input("Ask me about the application process..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if prompt := st.chat_input("Type your response..."):
+        # Add user message
+        st.session_state.fallback_messages.append({
+            "role": "user",
+            "content": prompt
+        })
         
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Generate simple response
+        response = generate_simple_chat_response(
+            prompt, 
+            st.session_state.fallback_state
+        )
         
-        # Generate assistant response (simplified for demo)
-        with st.chat_message("assistant"):
-            response = generate_chat_response(prompt)
-            st.markdown(response)
+        # Add assistant response
+        st.session_state.fallback_messages.append({
+            "role": "assistant", 
+            "content": response["message"]
+        })
         
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Update state
+        st.session_state.fallback_state.update(response.get("state_update", {}))
+        
+        st.rerun()
 
 
-def generate_chat_response(prompt):
-    """Generate a simple chat response (placeholder)"""
+def generate_simple_chat_response(user_input: str, state: dict) -> dict:
+    """Generate simple chat response for fallback mode"""
     
-    # This is a simplified response system
-    # In production, this would use the LLM with proper context
+    current_step = state.get("step", "name_collection")
     
-    prompt_lower = prompt.lower()
+    if current_step == "name_collection":
+        if len(user_input.split()) >= 2:
+            state["data"]["name"] = user_input
+            return {
+                "message": f"Nice to meet you, {user_input}! What's your current employment status? Are you employed, unemployed, self-employed, or retired?",
+                "state_update": {"step": "employment"}
+            }
+        else:
+            return {
+                "message": "Could you provide your full name (first and last name)?",
+                "state_update": {}
+            }
     
-    if "eligibility" in prompt_lower:
-        return "To be eligible for social support, you need to meet income thresholds, family size requirements, and other criteria. The AI system evaluates multiple factors including financial need, family composition, and employment stability."
+    elif current_step == "employment":
+        employment = "unemployed"
+        if "employed" in user_input.lower() and "unemployed" not in user_input.lower():
+            employment = "employed"
+        elif "self" in user_input.lower():
+            employment = "self_employed" 
+        elif "retired" in user_input.lower():
+            employment = "retired"
+        
+        state["data"]["employment_status"] = employment
+        return {
+            "message": f"I understand you are {employment}. What's your approximate monthly income in AED?",
+            "state_update": {"step": "income"}
+        }
     
-    elif "documents" in prompt_lower:
-        return "You can upload these document types: Bank statements, Emirates ID, Resume, Credit reports, and Assets/liabilities spreadsheets. Each document is processed using specialized AI for data extraction."
+    elif current_step == "income":
+        # Extract number from input
+        import re
+        numbers = re.findall(r'\d+', user_input)
+        income = int(numbers[0]) if numbers else 0
+        
+        state["data"]["monthly_income"] = income
+        return {
+            "message": f"Thank you. How many people are in your household (including yourself)?",
+            "state_update": {"step": "family_size"}
+        }
     
-    elif "process" in prompt_lower or "time" in prompt_lower:
-        return "The AI workflow typically processes applications in under 2 minutes. It includes document analysis, data validation, eligibility assessment, and final decision generation."
-    
-    elif "support" in prompt_lower or "amount" in prompt_lower:
-        return "Support amounts are calculated based on family size, income level, housing costs, and special circumstances. The base amount is 1,000 AED with additional supplements for larger families and special needs."
+    elif current_step == "family_size":
+        import re
+        numbers = re.findall(r'\d+', user_input)
+        family_size = int(numbers[0]) if numbers else 1
+        
+        state["data"]["family_size"] = family_size
+        
+        # Simple eligibility calculation
+        income = state["data"].get("monthly_income", 0)
+        threshold = 3000 * family_size
+        
+        if income < threshold:
+            support = max(500, (threshold - income) * 0.5)
+            return {
+                "message": f"🎉 Great news! Based on your information, you are eligible for approximately {support:.0f} AED per month in social support. A complete assessment would provide more detailed calculations.",
+                "state_update": {"step": "complete"}
+            }
+        else:
+            return {
+                "message": "Based on your income level, you may not qualify for direct financial support, but there are economic enablement programs that could help you.",
+                "state_update": {"step": "complete"}
+            }
     
     else:
-        return "I can help you with information about eligibility criteria, required documents, the application process, and support amounts. What specific aspect would you like to know more about?"
+        return {
+            "message": "Thank you for using the Social Support AI system! Your application information has been recorded.",
+            "state_update": {}
+        }
 
 
 def show_testing_page():

@@ -20,7 +20,16 @@ import numpy as np
 from PyPDF2 import PdfReader
 from docx import Document
 import openpyxl
-from loguru import logger
+import sys
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Import logging configuration
+from src.utils.logging_config import get_logger
+
+# Setup logging
+logger = get_logger("document_processor")
 
 from config import settings
 
@@ -53,39 +62,60 @@ class DocumentProcessor:
             Dictionary containing extracted information
         """
         try:
+            logger.info(f"Starting document processing: {file_path} (type: {document_type})")
+            
+            # Check if file exists
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                raise FileNotFoundError(f"File not found: {file_path}")
+            
+            # Get file info
+            file_size = os.path.getsize(file_path)
+            logger.info(f"File size: {file_size} bytes")
+            
             file_extension = Path(file_path).suffix.lower().lstrip('.')
+            logger.info(f"File extension: {file_extension}")
             
             if file_extension not in self.supported_formats:
+                logger.error(f"Unsupported file format: {file_extension}")
                 raise ValueError(f"Unsupported file format: {file_extension}")
             
             logger.info(f"Processing {document_type} document: {file_path}")
             
             # Extract raw data using appropriate processor
+            logger.info(f"Using processor for extension: {file_extension}")
             raw_data = self.supported_formats[file_extension](file_path)
+            logger.info(f"Raw data extraction completed. Data type: {raw_data.get('type', 'unknown')}")
             
             # Apply document-specific processing
+            logger.info(f"Applying document-specific processing for: {document_type}")
             processed_data = self._apply_document_specific_processing(
                 raw_data, document_type
             )
+            logger.info(f"Document-specific processing completed")
             
-            return {
+            result = {
                 'status': 'success',
                 'document_type': document_type,
                 'raw_data': raw_data,
                 'processed_data': processed_data,
                 'metadata': {
                     'file_path': file_path,
-                    'file_size': os.path.getsize(file_path),
+                    'file_size': file_size,
                     'file_extension': file_extension
                 }
             }
             
+            logger.info(f"Document processing completed successfully for: {file_path}")
+            return result
+            
         except Exception as e:
-            logger.error(f"Error processing document {file_path}: {e}")
+            logger.error(f"Error processing document {file_path}: {str(e)}", exc_info=True)
             return {
                 'status': 'error',
                 'error': str(e),
-                'document_type': document_type
+                'document_type': document_type,
+                'file_path': file_path
             }
     
     def _process_pdf(self, file_path: str) -> Dict[str, Any]:
@@ -115,30 +145,92 @@ class DocumentProcessor:
     def _process_image(self, file_path: str) -> Dict[str, Any]:
         """Extract text from images using OCR"""
         try:
+            logger.info(f"Starting image processing for: {file_path}")
+            
+            # Check if tesseract is available
+            try:
+                import pytesseract
+                # Test if tesseract is installed
+                version = pytesseract.get_tesseract_version()
+                logger.info(f"Tesseract version: {version}")
+            except (ImportError, pytesseract.TesseractNotFoundError) as e:
+                logger.warning(f"Tesseract not available: {str(e)}")
+                return {
+                    'type': 'image',
+                    'text': '',
+                    'error': 'OCR not available - Tesseract not installed',
+                    'ocr_confidence': 0,
+                    'image_dimensions': None,
+                    'detected_text_blocks': 0,
+                    'installation_note': 'To enable OCR processing, install Tesseract: brew install tesseract (macOS) or apt-get install tesseract-ocr (Ubuntu)'
+                }
+            
             # Load and preprocess image
+            logger.info(f"Loading image: {file_path}")
             image = cv2.imread(file_path)
+            if image is None:
+                logger.error(f"Could not load image from {file_path}")
+                raise ValueError(f"Could not load image from {file_path}")
+            
+            logger.info(f"Image loaded successfully. Shape: {image.shape}")
+            
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            logger.info("Converted image to grayscale")
             
             # Apply image enhancement for better OCR
             gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+            logger.info("Applied image thresholding")
             
             # Extract text using OCR
+            logger.info("Starting OCR text extraction")
             text = pytesseract.image_to_string(gray)
+            logger.info(f"OCR text extraction completed. Text length: {len(text)}")
             
             # Get additional OCR data
+            logger.info("Getting OCR confidence data")
             ocr_data = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            
+            confidence_scores = [int(conf) for conf in ocr_data['conf'] if int(conf) > 0]
+            avg_confidence = np.mean(confidence_scores) if confidence_scores else 0
+            text_blocks = len([t for t in ocr_data['text'] if t.strip()])
+            
+            logger.info(f"OCR completed. Confidence: {avg_confidence:.2f}, Text blocks: {text_blocks}")
+            
+            result = {
+                'type': 'image',
+                'text': text,
+                'ocr_confidence': avg_confidence,
+                'image_dimensions': image.shape[:2],
+                'detected_text_blocks': text_blocks
+            }
+            
+            logger.info(f"Image processing completed successfully for: {file_path}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing image {file_path}: {str(e)}", exc_info=True)
+            
+            # Return a more helpful error message
+            error_msg = str(e)
+            if "tesseract" in error_msg.lower():
+                error_msg = "OCR service not available. To process images, please install Tesseract OCR."
+                installation_help = {
+                    'macOS': 'brew install tesseract',
+                    'Ubuntu/Debian': 'sudo apt-get install tesseract-ocr',
+                    'Windows': 'Download from: https://github.com/UB-Mannheim/tesseract/wiki'
+                }
+            else:
+                installation_help = {}
             
             return {
                 'type': 'image',
-                'text': text,
-                'ocr_confidence': np.mean([int(conf) for conf in ocr_data['conf'] if int(conf) > 0]),
-                'image_dimensions': image.shape[:2],
-                'detected_text_blocks': len([t for t in ocr_data['text'] if t.strip()])
+                'text': '',
+                'error': error_msg,
+                'ocr_confidence': 0,
+                'image_dimensions': None,
+                'detected_text_blocks': 0,
+                'installation_help': installation_help
             }
-            
-        except Exception as e:
-            logger.error(f"Error processing image {file_path}: {e}")
-            raise
     
     def _process_excel(self, file_path: str) -> Dict[str, Any]:
         """Process Excel files and extract tabular data"""

@@ -99,6 +99,11 @@ class EligibilityAssessmentAgent(BaseAgent):
                     application_data, extracted_documents
                 )
             
+            # Perform data validation and inconsistency detection
+            validation_result = await self._perform_data_validation(
+                application_data, extracted_documents
+            )
+            
             # Calculate support amount if eligible
             if assessment_result["eligible"]:
                 if self.use_ml_models:
@@ -131,11 +136,18 @@ class EligibilityAssessmentAgent(BaseAgent):
                 application_data, extracted_documents, assessment_result
             )
             
+            # Generate economic enablement recommendations
+            enablement_recommendations = await self._generate_economic_enablement_recommendations(
+                application_data, extracted_documents, assessment_result
+            )
+            
             return {
                 "agent_name": self.agent_name,
                 "application_id": application_id,
                 "assessment_result": assessment_result,
+                "validation_result": validation_result,
                 "reasoning": reasoning,
+                "economic_enablement": enablement_recommendations,
                 "assessed_at": datetime.utcnow().isoformat(),
                 "assessment_method": "ml_based" if self.use_ml_models else "rule_based",
                 "status": "success"
@@ -558,17 +570,28 @@ class EligibilityAssessmentAgent(BaseAgent):
         
         task = "Generate a comprehensive assessment reasoning"
         
+        # Safely extract component scores
+        component_scores = assessment_result.get("component_scores", {})
+        if not component_scores:
+            # If no component scores, create a simplified structure
+            component_scores = {
+                "overall_assessment": {
+                    "score": assessment_result.get("total_score", 0),
+                    "assessment": "automated_evaluation"
+                }
+            }
+        
         context = {
             "application_summary": {
                 "monthly_income": application_data.get("monthly_income", 0),
                 "family_size": application_data.get("family_size", 1),
                 "employment_status": application_data.get("employment_status", "unknown"),
-                "housing_type": application_data.get("housing_type", "unknown")
+                "housing_type": application_data.get("housing_status", "unknown")
             },
             "assessment_result": {
-                "eligible": assessment_result["eligible"],
-                "total_score": assessment_result["total_score"],
-                "component_scores": assessment_result["component_scores"]
+                "eligible": assessment_result.get("eligible", False),
+                "total_score": assessment_result.get("total_score", 0),
+                "component_scores": component_scores
             },
             "support_amount": assessment_result.get("support_calculation", {}).get("monthly_support_amount", 0)
         }
@@ -620,4 +643,413 @@ class EligibilityAssessmentAgent(BaseAgent):
             "key_factors": ["Automated assessment based on eligibility criteria"],
             "summary": summary,
             "generated_by": "fallback_system"
-        } 
+        }
+
+    async def _generate_economic_enablement_recommendations(
+        self, 
+        application_data: Dict[str, Any], 
+        extracted_documents: Dict[str, Any],
+        assessment_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate comprehensive economic enablement recommendations based on assessment"""
+        
+        recommendations = []
+        
+        # Job Training and Upskilling Recommendations
+        training_programs = [
+           {
+               "name": "Digital Skills Training Program",
+               "duration": "3 months",
+               "description": "Learn essential computer skills, Microsoft Office, and basic digital literacy",
+               "provider": "UAE Digital Skills Academy",
+               "cost": "Free for eligible applicants",
+               "contact": "800-SKILLS"
+           },
+           {
+               "name": "Vocational Training Certificate",
+               "duration": "6 months", 
+               "description": "Hands-on training in trades like plumbing, electrical work, or automotive repair",
+               "provider": "Technical Education Institute",
+               "cost": "Subsidized for low-income families",
+               "contact": "04-123-4567"
+           },
+           {
+               "name": "English Language Course",
+               "duration": "4 months",
+               "description": "Improve English communication skills for better job opportunities",
+               "provider": "Community Learning Center",
+               "cost": "Free",
+               "contact": "02-987-6543"
+           }
+        ]
+        
+        # Job Matching Opportunities
+        job_opportunities = [
+           {
+               "title": "Customer Service Representative",
+               "company": "Various Companies",
+               "salary_range": "3000-4500 AED",
+               "requirements": "Basic English, computer skills",
+               "contact": "UAE Employment Center - 800-JOBS"
+           },
+           {
+               "title": "Retail Sales Associate", 
+               "company": "Shopping Centers",
+               "salary_range": "2500-3500 AED",
+               "requirements": "Customer service skills, flexible schedule",
+               "contact": "Retail Jobs Portal - jobs.uae.gov"
+           },
+           {
+               "title": "Food Service Worker",
+               "company": "Restaurants & Hotels",
+               "salary_range": "2200-3200 AED",
+               "requirements": "Food safety certificate (provided)",
+               "contact": "Hospitality Jobs Center - 04-555-0123"
+           }
+        ]
+        
+        # Career Counseling Services
+        counseling_services = [
+           {
+               "service": "Career Assessment & Planning",
+               "provider": "UAE Career Development Center",
+               "description": "Professional assessment to identify strengths and career paths",
+               "cost": "Free consultation",
+               "contact": "800-CAREER"
+           },
+           {
+               "service": "Resume Writing Workshop",
+               "provider": "Employment Support Services",
+               "description": "Learn to create professional resumes and cover letters",
+               "cost": "Free",
+               "contact": "career.support@uae.gov"
+           },
+           {
+               "service": "Interview Skills Training",
+               "provider": "Professional Development Institute",
+               "description": "Practice interview techniques and build confidence",
+               "cost": "Free for social support recipients",
+               "contact": "04-321-9876"
+           }
+        ]
+        
+        # Financial Literacy Programs
+        financial_programs = [
+           {
+               "program": "Personal Finance Management",
+               "provider": "UAE Financial Literacy Center",
+               "description": "Learn budgeting, saving, and financial planning skills",
+               "duration": "2 months",
+               "cost": "Free",
+               "contact": "finance.education@uae.gov"
+           },
+           {
+               "program": "Small Business Development",
+               "provider": "Entrepreneurship Support Center",
+               "description": "Training for starting and managing small businesses",
+               "duration": "3 months",
+               "cost": "Subsidized",
+               "contact": "800-BUSINESS"
+           }
+        ]
+        
+        # Generate personalized recommendations based on assessment
+        if assessment_result["eligible"]:
+            recommendations.extend([
+               "✅ **Immediate Support**: You qualify for monthly financial assistance. Use this time to focus on skill development.",
+               "📚 **Skill Development**: Enroll in digital skills or vocational training to improve job prospects.",
+               "💼 **Job Search**: Register with UAE Employment Center for job matching services.",
+               "💰 **Financial Planning**: Attend financial literacy workshops to maximize your support benefits.",
+               "🎯 **Career Counseling**: Get professional guidance to identify the best career path for your situation."
+            ])
+            
+            summary = f"""🎉 **Good news!** You qualify for social support. Here's your path to economic independence:
+
+**Immediate Next Steps:**
+1. **Financial Support**: You'll receive monthly assistance to cover basic needs
+2. **Skill Building**: Use this stability to invest in your future through training programs
+3. **Job Preparation**: Work with career counselors to prepare for employment
+4. **Long-term Planning**: Develop financial literacy skills for sustainable independence
+
+**Available Programs:**
+- **Training**: {len(training_programs)} programs available
+- **Job Opportunities**: {len(job_opportunities)} types of positions
+- **Support Services**: {len(counseling_services)} counseling services
+- **Financial Education**: {len(financial_programs)} programs
+
+Remember: This support is designed to help you become self-sufficient. Take advantage of all available resources!"""
+        
+        else:
+            recommendations.extend([
+               "📚 **Skill Enhancement**: Focus on developing marketable skills through free training programs.",
+               "💼 **Job Search Assistance**: Use employment services to find better-paying opportunities.", 
+               "🎯 **Career Counseling**: Get professional guidance to improve your employment prospects.",
+               "💰 **Financial Planning**: Learn budgeting and financial management skills.",
+               "🔄 **Reapply Later**: Consider reapplying after improving your employment situation."
+            ])
+            
+            summary = f"""While you don't qualify for direct financial support at this time, there are many resources to help improve your situation:
+
+**Focus Areas:**
+1. **Skill Development**: Enhance your qualifications through free training programs
+2. **Job Search**: Access employment services for better opportunities
+3. **Financial Management**: Learn to optimize your current income
+4. **Future Planning**: Work toward qualifying for support in the future
+
+**Available Resources:**
+- **Free Training**: {len(training_programs)} programs to boost your skills
+- **Job Assistance**: {len(job_opportunities)} types of opportunities available
+- **Career Support**: {len(counseling_services)} professional services
+- **Financial Education**: {len(financial_programs)} programs for money management
+
+Don't give up! These resources can help you build a stronger financial foundation."""
+        
+        return {
+            "recommendations": recommendations,
+            "training_programs": training_programs,
+            "job_opportunities": job_opportunities, 
+            "counseling_services": counseling_services,
+            "financial_programs": financial_programs,
+            "summary": summary,
+            "generated_by": "comprehensive_system"
+        }
+    
+    async def _perform_data_validation(
+        self, 
+        application_data: Dict[str, Any], 
+        extracted_documents: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Perform comprehensive data validation and inconsistency detection
+        Addresses the problem statement requirements for:
+        - Manual Data Gathering errors
+        - Semi-Automated Data Validations
+        - Inconsistent Information detection
+        """
+        
+        validation_issues = []
+        inconsistencies = []
+        confidence_score = 1.0
+        
+        # 1. Basic Field Validation
+        required_fields = ["name", "emirates_id", "monthly_income", "family_size"]
+        for field in required_fields:
+            if not application_data.get(field):
+                validation_issues.append(f"Missing required field: {field}")
+                confidence_score -= 0.1
+        
+        # 2. Emirates ID Format Validation
+        emirates_id = application_data.get("emirates_id", "")
+        if emirates_id and not self._validate_emirates_id_format(emirates_id):
+            validation_issues.append("Invalid Emirates ID format")
+            confidence_score -= 0.15
+        
+        # 3. Income Validation and Cross-checking
+        stated_income = application_data.get("monthly_income", 0)
+        bank_statement_data = extracted_documents.get("bank_statement", {})
+        
+        if bank_statement_data and "monthly_income" in bank_statement_data:
+            bank_income = bank_statement_data["monthly_income"]
+            income_difference = abs(stated_income - bank_income) / max(stated_income, bank_income, 1)
+            
+            if income_difference > 0.2:  # More than 20% difference
+                inconsistencies.append({
+                    "type": "income_mismatch",
+                    "description": f"Stated income ({stated_income:,.0f} AED) differs significantly from bank statement ({bank_income:,.0f} AED)",
+                    "severity": "high" if income_difference > 0.5 else "medium",
+                    "difference_percentage": income_difference * 100
+                })
+                confidence_score -= 0.2 if income_difference > 0.5 else 0.1
+        
+        # 4. Employment Status Cross-validation
+        stated_employment = application_data.get("employment_status", "")
+        resume_data = extracted_documents.get("resume", {})
+        
+        if resume_data and "current_employment_status" in resume_data:
+            resume_employment = resume_data["current_employment_status"]
+            if stated_employment != resume_employment:
+                inconsistencies.append({
+                    "type": "employment_mismatch",
+                    "description": f"Stated employment status ({stated_employment}) differs from resume ({resume_employment})",
+                    "severity": "medium"
+                })
+                confidence_score -= 0.1
+        
+        # 5. Address Consistency Check
+        stated_address = application_data.get("address", "")
+        emirates_id_data = extracted_documents.get("emirates_id", {})
+        credit_report_data = extracted_documents.get("credit_report", {})
+        
+        addresses_to_check = []
+        if emirates_id_data.get("address"):
+            addresses_to_check.append(("Emirates ID", emirates_id_data["address"]))
+        if credit_report_data.get("address"):
+            addresses_to_check.append(("Credit Report", credit_report_data["address"]))
+        
+        for source, address in addresses_to_check:
+            if stated_address and address and not self._addresses_match(stated_address, address):
+                inconsistencies.append({
+                    "type": "address_mismatch",
+                    "description": f"Address from {source} doesn't match stated address",
+                    "severity": "medium"
+                })
+                confidence_score -= 0.1
+        
+        # 6. Family Size Validation
+        stated_family_size = application_data.get("family_size", 0)
+        if stated_family_size < 1 or stated_family_size > 15:
+            validation_issues.append(f"Unusual family size: {stated_family_size}")
+            confidence_score -= 0.1
+        
+        # 7. Income vs Family Size Reasonableness Check
+        if stated_income > 0 and stated_family_size > 0:
+            per_person_income = stated_income / stated_family_size
+            if per_person_income > 10000:  # Very high per-person income
+                validation_issues.append("Income appears unusually high for family size")
+                confidence_score -= 0.05
+            elif per_person_income < 100:  # Very low per-person income
+                validation_issues.append("Income appears unusually low - may need verification")
+                confidence_score -= 0.05
+        
+        # 8. Document Quality Assessment
+        document_quality_issues = []
+        for doc_type, doc_data in extracted_documents.items():
+            if doc_data.get("extraction_confidence", 1.0) < 0.7:
+                document_quality_issues.append(f"Low confidence in {doc_type} extraction")
+                confidence_score -= 0.05
+        
+        # 9. Fraud Risk Indicators
+        fraud_indicators = []
+        
+        # Check for duplicate applications (simplified)
+        if self._check_potential_duplicate(application_data):
+            fraud_indicators.append("Potential duplicate application detected")
+            confidence_score -= 0.3
+        
+        # Check for suspicious patterns
+        if self._check_suspicious_patterns(application_data, extracted_documents):
+            fraud_indicators.append("Suspicious data patterns detected")
+            confidence_score -= 0.2
+        
+        # Calculate overall validation status
+        total_issues = len(validation_issues) + len(inconsistencies) + len(fraud_indicators)
+        
+        if total_issues == 0:
+            validation_status = "passed"
+        elif total_issues <= 2 and not fraud_indicators:
+            validation_status = "passed_with_warnings"
+        elif total_issues <= 4 and confidence_score > 0.6:
+            validation_status = "requires_review"
+        else:
+            validation_status = "failed"
+        
+        return {
+            "validation_status": validation_status,
+            "confidence_score": max(0.0, confidence_score),
+            "validation_issues": validation_issues,
+            "inconsistencies": inconsistencies,
+            "document_quality_issues": document_quality_issues,
+            "fraud_indicators": fraud_indicators,
+            "total_issues": total_issues,
+            "recommendations": self._generate_validation_recommendations(
+                validation_status, validation_issues, inconsistencies, fraud_indicators
+            )
+        }
+    
+    def _validate_emirates_id_format(self, emirates_id: str) -> bool:
+        """Validate Emirates ID format (XXX-XXXX-XXXXXXX-X)"""
+        import re
+        pattern = r'^\d{3}-\d{4}-\d{7}-\d{1}$'
+        return bool(re.match(pattern, emirates_id))
+    
+    def _addresses_match(self, addr1: str, addr2: str) -> bool:
+        """Check if two addresses are similar (simplified matching)"""
+        if not addr1 or not addr2:
+            return False
+        
+        # Normalize addresses for comparison
+        addr1_norm = addr1.lower().replace(",", "").replace(".", "").strip()
+        addr2_norm = addr2.lower().replace(",", "").replace(".", "").strip()
+        
+        # Simple similarity check - in production, use more sophisticated matching
+        common_words = set(addr1_norm.split()) & set(addr2_norm.split())
+        total_words = set(addr1_norm.split()) | set(addr2_norm.split())
+        
+        if len(total_words) == 0:
+            return False
+        
+        similarity = len(common_words) / len(total_words)
+        return similarity > 0.6  # 60% similarity threshold
+    
+    def _check_potential_duplicate(self, application_data: Dict[str, Any]) -> bool:
+        """Check for potential duplicate applications (simplified)"""
+        # In production, this would check against a database of previous applications
+        # For now, return False (no duplicates detected)
+        return False
+    
+    def _check_suspicious_patterns(self, application_data: Dict[str, Any], extracted_documents: Dict[str, Any]) -> bool:
+        """Check for suspicious data patterns that might indicate fraud"""
+        
+        suspicious_indicators = 0
+        
+        # Check for round numbers (might indicate fabricated data)
+        income = application_data.get("monthly_income", 0)
+        if income > 0 and income % 1000 == 0 and income > 2000:
+            suspicious_indicators += 1
+        
+        # Check for inconsistent document timestamps (if available)
+        doc_dates = []
+        for doc_data in extracted_documents.values():
+            if "document_date" in doc_data:
+                doc_dates.append(doc_data["document_date"])
+        
+        # If documents are from very different time periods, it might be suspicious
+        if len(doc_dates) > 1:
+            # Simplified check - in production, use proper date parsing
+            pass
+        
+        # Check for unusual combinations
+        employment_status = application_data.get("employment_status", "")
+        if employment_status == "unemployed" and income > 5000:
+            suspicious_indicators += 1
+        
+        return suspicious_indicators >= 2
+    
+    def _generate_validation_recommendations(
+        self, 
+        validation_status: str, 
+        validation_issues: List[str], 
+        inconsistencies: List[Dict], 
+        fraud_indicators: List[str]
+    ) -> List[str]:
+        """Generate recommendations based on validation results"""
+        
+        recommendations = []
+        
+        if validation_status == "failed":
+            recommendations.append("Application requires manual review before processing")
+            recommendations.append("Verify all submitted documents and information")
+        
+        elif validation_status == "requires_review":
+            recommendations.append("Recommend manual verification of flagged inconsistencies")
+            recommendations.append("Consider requesting additional documentation")
+        
+        elif validation_status == "passed_with_warnings":
+            recommendations.append("Minor issues detected - proceed with standard processing")
+            recommendations.append("Monitor for any additional red flags")
+        
+        else:  # passed
+            recommendations.append("All validations passed - proceed with automated processing")
+        
+        # Specific recommendations based on issues
+        if any("income" in issue.lower() for issue in validation_issues):
+            recommendations.append("Request additional income verification documents")
+        
+        if inconsistencies:
+            recommendations.append("Clarify inconsistencies with applicant before final decision")
+        
+        if fraud_indicators:
+            recommendations.append("Escalate to fraud investigation team")
+            recommendations.append("Do not process until fraud concerns are resolved")
+        
+        return recommendations 

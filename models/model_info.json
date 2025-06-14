@@ -1,0 +1,19 @@
+{
+  "created": "2025-06-12 14:47:13",
+  "description": "ML models for Social Support AI Workflow",
+  "structure": {
+    "conversation/": "Conversation classification models",
+    "eligibility/": "Eligibility assessment models",
+    "data_extraction/": "Data extraction models",
+    "validation/": "Data validation models",
+    "checkpoints/": "Model checkpoints and backups"
+  },
+  "models": {
+    "eligibility_classifier.pkl": "RandomForest classifier for eligibility",
+    "support_amount_regressor.pkl": "Regression model for support amount",
+    "risk_classifier.pkl": "Risk assessment classifier",
+    "conversation_classifier.pkl": "Intent classification model",
+    "data_validator.pkl": "Data validation model",
+    "preprocessor.pkl": "Data preprocessing pipeline"
+  }
+}

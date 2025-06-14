@@ -12,6 +12,17 @@ from typing import Dict, Any, List, Optional
 import re
 import json
 from datetime import datetime
+import os
+import sys
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Import logging configuration
+from src.utils.logging_config import get_logger
+
+# Setup logging
+logger = get_logger("data_extraction_agent")
 
 from .base_agent import BaseAgent
 from src.data.document_processor import DocumentProcessor
@@ -70,7 +81,7 @@ class DataExtractionAgent(BaseAgent):
         
         Args:
             input_data: {
-                "documents": [{"file_path": str, "document_type": str}],
+                "documents": [{"file_path": str, "document_type": str}] or [{"path": str, "type": str}] or [str],
                 "application_id": str
             }
             
@@ -83,10 +94,25 @@ class DataExtractionAgent(BaseAgent):
         extraction_results = {}
         
         for doc_info in documents:
-            file_path = doc_info["file_path"]
-            document_type = doc_info["document_type"]
-            
             try:
+                # Handle different document formats
+                file_path, document_type = self._extract_document_info(doc_info)
+                
+                if not file_path:
+                    extraction_results[f"document_{len(extraction_results)}"] = {
+                        "status": "error",
+                        "error": "No file path provided in document"
+                    }
+                    continue
+                
+                # Check if file exists
+                if not os.path.exists(file_path):
+                    extraction_results[document_type or f"document_{len(extraction_results)}"] = {
+                        "status": "error",
+                        "error": f"File not found: {file_path}"
+                    }
+                    continue
+                
                 # First, process document using document processor
                 raw_extraction = self.document_processor.process_document(
                     file_path, document_type
@@ -112,12 +138,14 @@ class DataExtractionAgent(BaseAgent):
                 }
                 
             except Exception as e:
-                extraction_results[document_type] = {
+                doc_key = document_type if 'document_type' in locals() else f"document_{len(extraction_results)}"
+                extraction_results[doc_key] = {
                     "status": "error",
-                    "error": str(e)
+                    "error": f"Processing error: {str(e)}"
                 }
         
         return {
+            "status": "success" if any(r.get("status") == "success" for r in extraction_results.values()) else "error",
             "agent_name": self.agent_name,
             "application_id": application_id,
             "extraction_results": extraction_results,
@@ -125,6 +153,57 @@ class DataExtractionAgent(BaseAgent):
             "successful_extractions": len([r for r in extraction_results.values() 
                                          if r.get("status") == "success"])
         }
+    
+    def _extract_document_info(self, doc_info) -> tuple[str, str]:
+        """Extract file path and document type from various document formats"""
+        
+        file_path = None
+        document_type = "unknown"
+        
+        if isinstance(doc_info, str):
+            # Simple string path
+            file_path = doc_info
+            # Try to guess document type from filename
+            document_type = self._guess_document_type(file_path)
+            
+        elif isinstance(doc_info, dict):
+            # Dictionary format - try different key combinations
+            file_path = (
+                doc_info.get("file_path") or 
+                doc_info.get("path") or 
+                doc_info.get("filepath") or
+                doc_info.get("file")
+            )
+            
+            document_type = (
+                doc_info.get("document_type") or 
+                doc_info.get("type") or 
+                doc_info.get("doc_type") or
+                self._guess_document_type(file_path) if file_path else "unknown"
+            )
+        
+        return file_path, document_type
+    
+    def _guess_document_type(self, file_path: str) -> str:
+        """Guess document type from file path"""
+        
+        if not file_path:
+            return "unknown"
+        
+        filename = file_path.lower()
+        
+        if "emirates" in filename or "id" in filename:
+            return "emirates_id"
+        elif "bank" in filename or "statement" in filename:
+            return "bank_statement"
+        elif "resume" in filename or "cv" in filename:
+            return "resume"
+        elif "credit" in filename or "report" in filename:
+            return "credit_report"
+        elif "asset" in filename or "liabilit" in filename:
+            return "assets"
+        else:
+            return "unknown"
     
     async def _extract_structured_data(
         self, 
@@ -225,7 +304,28 @@ class DataExtractionAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """Extract structured data from Emirates ID"""
         
+        # Check if OCR failed due to missing Tesseract
+        if raw_data.get("raw_data", {}).get("error"):
+            error_msg = raw_data["raw_data"]["error"]
+            if "tesseract" in error_msg.lower() or "ocr not available" in error_msg.lower():
+                return {
+                    "extraction_method": "ocr_unavailable",
+                    "error": "OCR processing not available",
+                    "user_message": "I can't read text from images right now because OCR is not set up. Please tell me your Emirates ID information manually.",
+                    "installation_help": raw_data["raw_data"].get("installation_help", {}),
+                    "fallback_instructions": "Please provide: Full name, Emirates ID number (XXX-XXXX-XXXXXXX-X), and date of birth"
+                }
+        
         text_content = raw_data.get("raw_data", {}).get("text", "")
+        
+        # If no text was extracted, provide fallback
+        if not text_content or len(text_content.strip()) < 10:
+            return {
+                "extraction_method": "manual_required",
+                "error": "Could not extract text from image",
+                "user_message": "I had trouble reading your Emirates ID. Could you please tell me your full name and Emirates ID number?",
+                "fallback_instructions": "Please provide: Full name, Emirates ID number (XXX-XXXX-XXXXXXX-X)"
+            }
         
         system_prompt = """You are an identity verification specialist. Extract personal 
         information from Emirates ID documents with high accuracy."""

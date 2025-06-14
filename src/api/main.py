@@ -11,9 +11,13 @@ Provides REST API endpoints for:
 """
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import shutil
+import asyncio
+import json
+from pathlib import Path
+import numpy as np
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,10 +29,18 @@ from sqlalchemy.orm import Session
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+# Import logging configuration first
+from src.utils.logging_config import get_logger
+
+# Setup logging
+logger = get_logger("api")
+
 from config import settings, get_upload_path
 from src.models.database import get_db, Application, Document
 from src.agents.master_orchestrator import MasterOrchestrator
 from src.data.synthetic_data import SyntheticDataGenerator
+from src.agents.conversation_agent import ConversationAgent
+from src.workflows.langgraph_workflow import create_conversation_workflow, ConversationState
 
 # Import ML endpoints
 try:
@@ -95,6 +107,35 @@ if ML_ENDPOINTS_AVAILABLE:
 orchestrator = MasterOrchestrator()
 synthetic_generator = SyntheticDataGenerator()
 
+# Custom JSON encoder to handle numpy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+def convert_numpy_types(obj: Any) -> Any:
+    """Recursively convert numpy types to Python native types"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 @app.get("/")
 async def root():
@@ -479,6 +520,267 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0"
     }
+
+
+# Add conversation endpoints
+@app.post("/conversation/message")
+async def process_conversation_message(request: Dict[str, Any]):
+    """Process a conversation message through the AI agent"""
+    
+    try:
+        user_message = request.get("message", "")
+        conversation_history = request.get("conversation_history", [])
+        conversation_state = request.get("conversation_state", {})
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        # Initialize conversation agent
+        conversation_agent = ConversationAgent()
+        
+        # Process the message
+        response = await conversation_agent.process_message(
+            user_message,
+            conversation_history,
+            conversation_state
+        )
+        
+        # Convert numpy types to Python native types
+        clean_response = convert_numpy_types(response)
+        
+        return {
+            "status": "success",
+            **clean_response
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing conversation message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+
+
+@app.post("/conversation/upload-document")
+async def process_conversation_document(
+    file: UploadFile = File(...),
+    file_type: str = Form(...),
+    conversation_state: str = Form("{}")
+):
+    """Process uploaded document during conversation"""
+    
+    try:
+        logger.info(f"Document upload started - File: {file.filename}, Type: {file_type}, Size: {file.size}")
+        
+        # Parse conversation state
+        try:
+            state = json.loads(conversation_state) if conversation_state else {}
+            logger.info(f"Conversation state parsed successfully. Current step: {state.get('current_step', 'unknown')}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse conversation state: {str(e)}")
+            state = {}
+        
+        # Save uploaded file
+        upload_dir = "data/uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_path = os.path.join(upload_dir, file.filename)
+        logger.info(f"Saving file to: {file_path}")
+        
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+            logger.info(f"File saved successfully. Size: {len(content)} bytes")
+        
+        # Initialize conversation agent
+        logger.info("Initializing conversation agent")
+        conversation_agent = ConversationAgent()
+        
+        # Process document
+        logger.info(f"Starting document processing with conversation agent")
+        response = await conversation_agent.process_document_upload(
+            file_path,
+            file_type,
+            state
+        )
+        logger.info(f"Document processing completed. Response keys: {list(response.keys())}")
+        
+        # Convert numpy types to Python native types
+        clean_response = convert_numpy_types(response)
+        
+        result = {
+            "status": "success",
+            "file_path": file_path,
+            **clean_response
+        }
+        
+        logger.info(f"Document upload endpoint completed successfully for: {file.filename}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing document upload: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+
+
+@app.post("/conversation/workflow/start")
+async def start_conversation_workflow(request: Dict[str, Any]):
+    """Start a new conversation workflow using LangGraph"""
+    
+    try:
+        # Create workflow
+        workflow = create_conversation_workflow()
+        
+        # Initialize state
+        initial_state: ConversationState = {
+            "messages": [],
+            "collected_data": {},
+            "current_step": "greeting",
+            "eligibility_result": None,
+            "final_decision": None,
+            "uploaded_documents": [],
+            "workflow_history": [],
+            "application_id": None,
+            "processing_status": "initializing",
+            "error_messages": []
+        }
+        
+        # Run initialization
+        result = await workflow.ainvoke(initial_state)
+        
+        return {
+            "status": "success",
+            "workflow_state": result,
+            "application_id": result.get("application_id")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting conversation workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error starting workflow: {str(e)}")
+
+
+@app.post("/conversation/workflow/continue")
+async def continue_conversation_workflow(request: Dict[str, Any]):
+    """Continue an existing conversation workflow"""
+    
+    try:
+        workflow_state = request.get("workflow_state", {})
+        user_message = request.get("user_message", "")
+        
+        if not workflow_state:
+            raise HTTPException(status_code=400, detail="Workflow state is required")
+        
+        # Add user message to state
+        if user_message:
+            workflow_state["messages"].append({
+                "role": "user",
+                "content": user_message,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # Create workflow
+        workflow = create_conversation_workflow()
+        
+        # Continue workflow
+        result = await workflow.ainvoke(workflow_state)
+        
+        return {
+            "status": "success",
+            "workflow_state": result,
+            "is_complete": result.get("processing_status") == "completed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error continuing conversation workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error continuing workflow: {str(e)}")
+
+
+@app.post("/conversation/workflow/upload")
+async def upload_to_workflow(
+    file: UploadFile = File(...),
+    workflow_state: str = Form(...),
+    file_type: str = Form(...)
+):
+    """Upload document to existing workflow"""
+    
+    try:
+        # Parse workflow state
+        state = json.loads(workflow_state)
+        
+        # Save uploaded file
+        upload_dir = "data/uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_path = os.path.join(upload_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Add file to workflow state
+        if "uploaded_documents" not in state:
+            state["uploaded_documents"] = []
+        state["uploaded_documents"].append(file_path)
+        
+        # Create workflow and continue processing
+        workflow = create_conversation_workflow()
+        result = await workflow.ainvoke(state)
+        
+        return {
+            "status": "success",
+            "workflow_state": result,
+            "file_path": file_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading to workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
+
+
+@app.get("/conversation/session/{session_id}")
+async def get_conversation_session(session_id: str):
+    """Get conversation session data"""
+    
+    try:
+        # In a real implementation, this would fetch from database
+        # For now, return mock data
+        
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Hello! I'm your Social Support AI Assistant.",
+                    "timestamp": datetime.now().isoformat()
+                }
+            ],
+            "state": {
+                "current_step": "greeting",
+                "collected_data": {},
+                "application_id": f"APP-{session_id}"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching conversation session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching session: {str(e)}")
+
+
+@app.post("/conversation/session/{session_id}/save")
+async def save_conversation_session(session_id: str, request: Dict[str, Any]):
+    """Save conversation session data"""
+    
+    try:
+        session_data = request.get("session_data", {})
+        
+        # In a real implementation, this would save to database
+        # For now, just return success
+        
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "saved_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error saving conversation session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error saving session: {str(e)}")
 
 
 if __name__ == "__main__":

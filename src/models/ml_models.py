@@ -19,12 +19,9 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import accuracy_score
 from loguru import logger
 
 from config import get_model_path
@@ -51,6 +48,9 @@ class SocialSupportMLModels:
         
         # Initialize models with justified hyperparameters
         self._initialize_models()
+        
+        # Try to load existing models, if none exist, create minimal training
+        self._ensure_models_ready()
         
     def _initialize_models(self):
         """Initialize all ML models with optimized hyperparameters"""
@@ -361,35 +361,122 @@ class SocialSupportMLModels:
             Dictionary with fraud detection results
         """
         
+        # Check if models exist
         if 'fraud_anomaly' not in self.models or 'fraud_classifier' not in self.models:
-            return {"error": "Fraud detection models not trained"}
+            logger.warning("Fraud detection models not trained, using rule-based fallback")
+            return self._fallback_fraud_detection(application_data, extracted_documents)
         
         try:
             features = self.prepare_features(application_data, extracted_documents, 'fraud')
             
-            # Anomaly detection
-            anomaly_score = self.models['fraud_anomaly'].decision_function(features)[0]
-            is_anomaly = self.models['fraud_anomaly'].predict(features)[0] == -1
+            # Check if IsolationForest is fitted - use a more robust check
+            try:
+                # Try to access the fitted attributes - this will raise an exception if not fitted
+                _ = self.models['fraud_anomaly'].decision_function(features)
+                
+                # If we get here, the model is fitted
+                anomaly_score = self.models['fraud_anomaly'].decision_function(features)[0]
+                is_anomaly = self.models['fraud_anomaly'].predict(features)[0] == -1
+                
+            except Exception as e:
+                logger.warning(f"IsolationForest not fitted or prediction failed: {e}, using rule-based fallback")
+                return self._fallback_fraud_detection(application_data, extracted_documents)
             
             # Fraud classification
-            if hasattr(self.scalers['fraud'], 'mean_'):
-                features_scaled = self.scalers['fraud'].transform(features)
-            else:
-                features_scaled = features
-            
-            fraud_probability = self.models['fraud_classifier'].predict_proba(features_scaled)[0]
+            try:
+                if hasattr(self.scalers['fraud'], 'mean_'):
+                    features_scaled = self.scalers['fraud'].transform(features)
+                else:
+                    features_scaled = features
+                
+                fraud_probability = self.models['fraud_classifier'].predict_proba(features_scaled)[0]
+                fraud_prob_value = float(fraud_probability[1] if len(fraud_probability) > 1 else fraud_probability[0])
+            except Exception as e:
+                logger.warning(f"Fraud classifier prediction failed: {e}, using anomaly score only")
+                fraud_prob_value = 0.5 if is_anomaly else 0.1
             
             return {
                 'is_anomaly': bool(is_anomaly),
                 'anomaly_score': float(anomaly_score),
-                'fraud_probability': float(fraud_probability[1] if len(fraud_probability) > 1 else fraud_probability[0]),
-                'risk_level': 'high' if is_anomaly or fraud_probability[1] > 0.7 else 'low',
-                'model_type': 'isolation_forest_svm'
+                'fraud_probability': fraud_prob_value,
+                'risk_level': 'high' if is_anomaly or fraud_prob_value > 0.7 else 'low',
+                'model_type': 'isolation_forest_svm',
+                'status': 'ml_prediction'
             }
             
         except Exception as e:
-            logger.error(f"Error in fraud detection: {e}")
-            return {"error": str(e)}
+            logger.error(f"Error in fraud detection: {e}, using rule-based fallback")
+            return self._fallback_fraud_detection(application_data, extracted_documents)
+    
+    def _fallback_fraud_detection(self, application_data: Dict[str, Any], 
+                                 extracted_documents: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Rule-based fraud detection fallback when ML models are not available
+        """
+        try:
+            # Extract key indicators
+            monthly_income = application_data.get('monthly_income', 0)
+            family_size = application_data.get('family_size', 1)
+            employment_status = application_data.get('employment_status', 'unknown')
+            
+            # Rule-based fraud indicators
+            fraud_indicators = []
+            fraud_score = 0.0
+            
+            # Income anomalies
+            if monthly_income > 15000:  # Very high income
+                fraud_indicators.append("unusually_high_income")
+                fraud_score += 0.3
+            elif monthly_income == 0 and employment_status == "employed":
+                fraud_indicators.append("income_employment_mismatch")
+                fraud_score += 0.4
+            
+            # Family size anomalies
+            if family_size > 12:  # Unusually large family
+                fraud_indicators.append("unusually_large_family")
+                fraud_score += 0.2
+            elif family_size <= 0:
+                fraud_indicators.append("invalid_family_size")
+                fraud_score += 0.5
+            
+            # Document inconsistencies (if available)
+            if extracted_documents:
+                bank_data = extracted_documents.get('bank_statement', {})
+                if bank_data and 'monthly_income' in bank_data:
+                    bank_income = bank_data.get('monthly_income', 0)
+                    if abs(bank_income - monthly_income) > monthly_income * 0.5:  # 50% difference
+                        fraud_indicators.append("income_document_mismatch")
+                        fraud_score += 0.4
+            
+            # Determine risk level
+            if fraud_score >= 0.7:
+                risk_level = 'high'
+            elif fraud_score >= 0.4:
+                risk_level = 'medium'
+            else:
+                risk_level = 'low'
+            
+            return {
+                'is_anomaly': fraud_score >= 0.5,
+                'anomaly_score': fraud_score,
+                'fraud_probability': fraud_score,
+                'risk_level': risk_level,
+                'fraud_indicators': fraud_indicators,
+                'model_type': 'rule_based_fallback',
+                'status': 'fallback_prediction'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in fallback fraud detection: {e}")
+            return {
+                'is_anomaly': False,
+                'anomaly_score': 0.0,
+                'fraud_probability': 0.0,
+                'risk_level': 'unknown',
+                'error': str(e),
+                'model_type': 'fallback_error',
+                'status': 'error'
+            }
     
     def match_economic_programs(self, application_data: Dict[str, Any], 
                                extracted_documents: Dict[str, Any]) -> Dict[str, Any]:
@@ -615,54 +702,67 @@ class SocialSupportMLModels:
         return np.array(targets)
     
     def save_models(self):
-        """Save trained models to disk"""
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        for model_name, model in self.models.items():
-            model_file = os.path.join(self.model_path, f"{model_name}_model_{timestamp}.joblib")
+        """Saves all trained models and scalers to disk, overwriting existing files."""
+        if not os.path.exists(self.model_path):
+            os.makedirs(self.model_path)
+            
+        logger.info("Saving models...")
+
+        for name, model in self.models.items():
+            model_file = os.path.join(self.model_path, f"{name}_model.joblib")
             joblib.dump(model, model_file)
-            
-        # Save scalers
-        for scaler_name, scaler in self.scalers.items():
-            scaler_file = os.path.join(self.model_path, f"{scaler_name}_scaler_{timestamp}.joblib")
-            joblib.dump(scaler, scaler_file)
+            logger.debug(f"Saved model '{name}' to {model_file}")
+
+        for name, scaler in self.scalers.items():
+            if hasattr(scaler, 'mean_'):  # Only save fitted scalers
+                scaler_file = os.path.join(self.model_path, f"{name}_scaler.joblib")
+                joblib.dump(scaler, scaler_file)
+                logger.debug(f"Saved scaler for '{name}' to {scaler_file}")
         
-        logger.info(f"Models saved to {self.model_path}")
-    
-    def load_models(self, timestamp: Optional[str] = None):
-        """Load trained models from disk"""
-        
-        if timestamp is None:
-            # Find latest models
-            model_files = [f for f in os.listdir(self.model_path) if f.endswith('.joblib')]
-            if not model_files:
-                logger.warning("No saved models found")
-                return
-            
-            # Extract timestamps and find latest
-            timestamps = set()
-            for file in model_files:
-                parts = file.split('_')
-                if len(parts) >= 3:
-                    timestamps.add(f"{parts[-2]}_{parts[-1].replace('.joblib', '')}")
-            
-            if timestamps:
-                timestamp = max(timestamps)
-        
-        # Load models
-        for model_name in self.models.keys():
-            model_file = os.path.join(self.model_path, f"{model_name}_model_{timestamp}.joblib")
+        logger.success("All models and scalers have been saved.")
+
+    def load_models(self) -> bool:
+        """
+        Loads all models and scalers from disk from fixed filenames.
+        """
+        if not os.path.exists(self.model_path):
+            logger.warning("Model directory not found. Models cannot be loaded.")
+            return False
+
+        logger.info("Attempting to load models from fixed file paths...")
+        loaded_any = False
+
+        for name in self.models.keys():
+            model_file = os.path.join(self.model_path, f"{name}_model.joblib")
             if os.path.exists(model_file):
-                self.models[model_name] = joblib.load(model_file)
-                logger.info(f"Loaded {model_name} model")
-        
-        # Load scalers
-        for scaler_name in self.scalers.keys():
-            scaler_file = os.path.join(self.model_path, f"{scaler_name}_scaler_{timestamp}.joblib")
+                try:
+                    self.models[name] = joblib.load(model_file)
+                    logger.debug(f"Loaded model '{name}' from {model_file}")
+                    loaded_any = True
+                except Exception as e:
+                    logger.error(f"Failed to load model {name} from {model_file}: {e}")
+            else:
+                logger.warning(f"Model file not found for '{name}': {model_file}")
+
+
+        for name in self.scalers.keys():
+            scaler_file = os.path.join(self.model_path, f"{name}_scaler.joblib")
             if os.path.exists(scaler_file):
-                self.scalers[scaler_name] = joblib.load(scaler_file)
-                logger.info(f"Loaded {scaler_name} scaler")
+                try:
+                    self.scalers[name] = joblib.load(scaler_file)
+                    logger.debug(f"Loaded scaler '{name}' from {scaler_file}")
+                except Exception as e:
+                    logger.error(f"Failed to load scaler {name} from {scaler_file}: {e}")
+            else:
+                # This might be okay if a model doesn't have a scaler
+                logger.info(f"Scaler file not found for '{name}': {scaler_file}")
+
+        if loaded_any:
+            logger.success("Successfully loaded available models.")
+        else:
+            logger.warning("No models were found or loaded from fixed paths.")
+            
+        return loaded_any
     
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about loaded models"""
@@ -676,4 +776,79 @@ class SocialSupportMLModels:
                 'trained': hasattr(model, 'feature_importances_') or hasattr(model, 'coef_')
             }
         
-        return info 
+        return info
+    
+    def _ensure_models_ready(self):
+        """Ensure models are ready for prediction by loading or creating minimal training"""
+        try:
+            # Try to load existing models
+            if not self.load_models():
+                logger.info("Could not load models, creating minimal training data...")
+                self._create_minimal_training()
+
+            # Check if critical models are fitted
+            if not self._check_models_fitted():
+                logger.info("Models not fitted, creating minimal training data...")
+                self._create_minimal_training()
+                
+        except Exception as e:
+            logger.warning(f"Could not load models: {e}, creating minimal training data...")
+            self._create_minimal_training()
+    
+    def _check_models_fitted(self) -> bool:
+        """Check if critical models are fitted and ready for prediction"""
+        try:
+            # Test fraud detection model (most critical)
+            test_features = np.array([[1000, 2, 5000, 12, 0, 600, 0.5]]).reshape(1, -1)
+            
+            # Try to predict with fraud model
+            _ = self.models['fraud_anomaly'].decision_function(test_features)
+            
+            return True
+        except:
+            return False
+    
+    def _create_minimal_training(self):
+        """Create minimal synthetic training data to make models functional"""
+        try:
+            logger.info("Creating minimal synthetic training data...")
+            
+            # Create minimal synthetic data
+            np.random.seed(42)
+            n_samples = 100
+            
+            # Generate synthetic features
+            data = {
+                'monthly_income': np.random.normal(2000, 800, n_samples),
+                'family_size': np.random.randint(1, 8, n_samples),
+                'number_of_dependents': np.random.randint(0, 5, n_samples),
+                'employment_duration_months': np.random.randint(0, 120, n_samples),
+                'total_assets': np.random.normal(10000, 5000, n_samples),
+                'total_liabilities': np.random.normal(5000, 3000, n_samples),
+                'monthly_rent': np.random.normal(800, 300, n_samples),
+                'credit_score': np.random.randint(300, 850, n_samples),
+                'employment_status': np.random.randint(1, 4, n_samples),
+                'housing_type': np.random.randint(0, 4, n_samples),
+                'has_medical_conditions': np.random.randint(0, 2, n_samples),
+                'debt_to_income_ratio': np.random.uniform(0, 2, n_samples),
+                'previous_applications': np.random.randint(0, 5, n_samples),
+                'has_criminal_record': np.random.randint(0, 2, n_samples),
+                'education_level': np.random.randint(0, 4, n_samples)
+            }
+            
+            # Ensure non-negative values where appropriate
+            data['monthly_income'] = np.abs(data['monthly_income'])
+            data['total_assets'] = np.abs(data['total_assets'])
+            data['total_liabilities'] = np.abs(data['total_liabilities'])
+            data['monthly_rent'] = np.abs(data['monthly_rent'])
+            
+            df = pd.DataFrame(data)
+            
+            # Train models with minimal data
+            training_result = self.train_models(df)
+            logger.info(f"Minimal training completed: {training_result.get('status', 'unknown')}")
+            
+        except Exception as e:
+            logger.error(f"Failed to create minimal training: {e}")
+            # If training fails, at least ensure fraud detection has a fallback
+            logger.info("Training failed, fraud detection will use rule-based fallback") 
