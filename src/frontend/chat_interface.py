@@ -80,6 +80,15 @@ def show_chat_interface():
 def show_interactive_buttons():
     """Show context-aware interactive buttons based on current conversation step"""
     
+    # Safety check: ensure conversation_state exists
+    if "conversation_state" not in st.session_state or st.session_state.conversation_state is None:
+        st.session_state.conversation_state = {
+            "current_step": "name_collection",
+            "collected_data": {},
+            "uploaded_documents": [],
+            "application_id": None
+        }
+    
     current_step = st.session_state.conversation_state.get("current_step", "name_collection")
     collected_data = st.session_state.conversation_state.get("collected_data", {})
     
@@ -228,6 +237,15 @@ def show_progress_sidebar():
     
     st.sidebar.markdown("### 📊 Application Progress")
     
+    # Safety check: ensure conversation_state exists
+    if "conversation_state" not in st.session_state or st.session_state.conversation_state is None:
+        st.session_state.conversation_state = {
+            "current_step": "name_collection",
+            "collected_data": {},
+            "uploaded_documents": [],
+            "application_id": None
+        }
+    
     current_step = st.session_state.conversation_state.get("current_step", "greeting")
     collected_data = st.session_state.conversation_state.get("collected_data", {})
     eligibility_result = st.session_state.conversation_state.get("eligibility_result", {})
@@ -301,6 +319,13 @@ def handle_button_click(button_value: str):
             st.session_state.conversation_state
         )
         
+        # Ensure response is not None
+        if response is None:
+            response = {
+                "message": "I'm having trouble processing your request right now. Could you please try again?",
+                "state_update": {}
+            }
+        
         # CRITICAL: Check if this is a restart scenario
         state_update = response.get("state_update", {})
         if (state_update.get("current_step") == "name_collection" and 
@@ -370,6 +395,13 @@ def handle_user_input(prompt: str):
             st.session_state.conversation_state
         )
         
+        # Ensure response is not None
+        if response is None:
+            response = {
+                "message": "I'm having trouble processing your request right now. Could you please try again?",
+                "state_update": {}
+            }
+        
         # CRITICAL: Check if this is a restart scenario
         state_update = response.get("state_update", {})
         if (state_update.get("current_step") == "name_collection" and 
@@ -405,14 +437,14 @@ def handle_user_input(prompt: str):
                 "role": "assistant",
                 "content": response["message"]
             })
-            
-            # Update conversation state
-            st.session_state.conversation_state.update(response.get("state_update", {}))
-            
-            # Check if application is complete
-            if response.get("application_complete"):
-                st.session_state.conversation_state["application_complete"] = True
-                show_final_results(response.get("final_decision"))
+        
+        # Update conversation state
+        st.session_state.conversation_state.update(response.get("state_update", {}))
+        
+        # Check if application is complete
+        if response.get("application_complete"):
+            st.session_state.conversation_state["application_complete"] = True
+            show_final_results(response.get("final_decision"))
             
     except Exception as e:
         st.session_state.conversation_messages.append({

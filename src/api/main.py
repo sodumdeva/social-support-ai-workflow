@@ -42,6 +42,7 @@ from src.agents.conversation_agent import ConversationAgent
 from src.agents.data_extraction_agent import DataExtractionAgent
 from src.agents.eligibility_agent import EligibilityAssessmentAgent
 from src.workflows.langgraph_workflow import create_conversation_workflow, ConversationState
+from src.models.database import DatabaseManager
 
 # Import ML endpoints
 try:
@@ -307,22 +308,97 @@ async def process_application(
     )
 
 
-@app.get("/applications/{application_id}/status", response_model=ApplicationStatus)
-async def get_application_status(
-    application_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get application status"""
-    application = db.query(Application).filter(Application.application_id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+@app.get("/applications/{application_id}/status")
+async def get_application_status(application_id: str, db: Session = Depends(get_db)):
+    """Get application status by application ID"""
     
-    return ApplicationStatus(
-        application_id=application.application_id,
-        status=application.status,
-        submitted_at=application.submitted_at,
-        processed_at=application.processed_at
-    )
+    try:
+        application = DatabaseManager.get_application_by_id(db, application_id)
+        
+        if not application:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        # Update status check tracking
+        DatabaseManager.update_status_check(db, application_id)
+        
+        return {
+            "application_id": application.application_id,
+            "reference_number": application.reference_number,
+            "status": application.status.value,
+            "full_name": application.full_name,
+            "submitted_at": application.created_at.isoformat() if application.created_at else None,
+            "processed_at": application.decision_date.isoformat() if application.decision_date else None,
+            "is_eligible": application.is_eligible,
+            "support_amount": application.recommended_support_amount,
+            "last_updated": application.updated_at.isoformat() if application.updated_at else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting application status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/applications/lookup")
+async def lookup_application(lookup_data: dict, db: Session = Depends(get_db)):
+    """Flexible application lookup using multiple methods"""
+    
+    try:
+        application = None
+        lookup_method = None
+        
+        # Method 1: Reference Number
+        if lookup_data.get("reference_number"):
+            application = DatabaseManager.get_application_by_reference(db, lookup_data["reference_number"])
+            lookup_method = "reference_number"
+        
+        # Method 2: Emirates ID
+        elif lookup_data.get("emirates_id"):
+            application = DatabaseManager.get_application_by_emirates_id(db, lookup_data["emirates_id"])
+            lookup_method = "emirates_id"
+        
+        # Method 3: Name + Phone Last 4
+        elif lookup_data.get("name") and lookup_data.get("phone_last4"):
+            application = DatabaseManager.get_application_by_phone_and_name(
+                db, lookup_data["phone_last4"], lookup_data["name"]
+            )
+            lookup_method = "name_phone"
+        
+        # Method 4: Full Application ID (fallback)
+        elif lookup_data.get("application_id"):
+            application = DatabaseManager.get_application_by_id(db, lookup_data["application_id"])
+            lookup_method = "application_id"
+        
+        if not application:
+            return {
+                "found": False,
+                "message": "Application not found. Please check your information and try again.",
+                "lookup_method": lookup_method
+            }
+        
+        # Update status check tracking
+        DatabaseManager.update_status_check(db, application.application_id)
+        
+        return {
+            "found": True,
+            "lookup_method": lookup_method,
+            "application": {
+                "application_id": application.application_id,
+                "reference_number": application.reference_number,
+                "full_name": application.full_name,
+                "status": application.status.value,
+                "submitted_at": application.created_at.isoformat() if application.created_at else None,
+                "decision_date": application.decision_date.isoformat() if application.decision_date else None,
+                "is_eligible": application.is_eligible,
+                "support_amount": application.recommended_support_amount,
+                "eligibility_reason": application.eligibility_reason,
+                "last_status_check": application.last_status_check.isoformat() if application.last_status_check else None,
+                "status_check_count": application.status_check_count or 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in application lookup: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/applications/{application_id}/results")

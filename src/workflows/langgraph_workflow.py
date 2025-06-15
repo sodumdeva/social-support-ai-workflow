@@ -20,6 +20,19 @@ from src.agents.conversation_agent import ConversationAgent, ConversationStep
 from src.agents.data_extraction_agent import DataExtractionAgent
 from src.agents.eligibility_agent import EligibilityAssessmentAgent
 
+# Import database components
+from src.models.database import (
+    SessionLocal, 
+    DatabaseManager, 
+    Application, 
+    Document,
+    ApplicationReview,
+    ApplicationStatus,
+    DocumentType,
+    EmploymentStatus,
+    HousingStatus
+)
+
 # Import logging configuration
 from src.utils.logging_config import get_logger
 logger = get_logger("langgraph_workflow")
@@ -424,7 +437,7 @@ async def validate_information(state: ConversationState) -> ConversationState:
 
 
 async def assess_eligibility(state: ConversationState) -> ConversationState:
-    """Assess eligibility for social support"""
+    """Assess eligibility for social support and store ML results"""
     
     try:
         logger.info("Starting eligibility assessment")
@@ -447,6 +460,66 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
             state["eligibility_result"] = decision
             state["processing_status"] = "eligibility_assessed"
             
+            # CRITICAL: Store ML model predictions in database if we have an application_id
+            if state.get("application_id") and decision.get("ml_prediction"):
+                try:
+                    db = SessionLocal()
+                    try:
+                        ml_prediction = decision.get("ml_prediction", {})
+                        
+                        # Store eligibility prediction
+                        if "eligible" in ml_prediction:
+                            eligibility_prediction_data = {
+                                "model_version": "v2.1",
+                                "prediction_type": "eligibility",
+                                "input_features": ml_prediction.get("features_used", {}),
+                                "prediction_result": {
+                                    "eligible": ml_prediction.get("eligible"),
+                                    "probability": ml_prediction.get("confidence", 0.5)
+                                },
+                                "confidence_score": ml_prediction.get("confidence", 0.5),
+                                "processing_time_ms": ml_prediction.get("processing_time_ms", 50.0)
+                            }
+                            
+                            DatabaseManager.store_ml_prediction(
+                                db, 
+                                state["application_id"], 
+                                "eligibility_classifier",
+                                eligibility_prediction_data
+                            )
+                        
+                        # Store support amount prediction
+                        if "support_amount" in ml_prediction:
+                            support_prediction_data = {
+                                "model_version": "v2.1",
+                                "prediction_type": "support_amount",
+                                "input_features": ml_prediction.get("features_used", {}),
+                                "prediction_result": {
+                                    "support_amount": ml_prediction.get("support_amount")
+                                },
+                                "confidence_score": ml_prediction.get("confidence", 0.5),
+                                "processing_time_ms": ml_prediction.get("processing_time_ms", 40.0)
+                            }
+                            
+                            DatabaseManager.store_ml_prediction(
+                                db, 
+                                state["application_id"], 
+                                "support_amount_regressor",
+                                support_prediction_data
+                            )
+                        
+                        db.commit()
+                        logger.info("✅ ML predictions stored in database")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to store ML predictions: {str(e)}")
+                        db.rollback()
+                    finally:
+                        db.close()
+                        
+                except Exception as e:
+                    logger.error(f"❌ Database connection failed for ML storage: {str(e)}")
+            
             logger.info(f"Eligibility assessment completed. Eligible: {decision.get('eligible', False)}")
             
         else:
@@ -459,18 +532,16 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
         state["workflow_history"].append({
             "step": "assess_eligibility",
             "eligibility_result": state["eligibility_result"],
+            "ml_predictions_stored": state.get("application_id") is not None,
             "timestamp": datetime.now().isoformat(),
             "status": "completed"
         })
         
     except Exception as e:
-        error_msg = f"Error during eligibility assessment: {str(e)}"
+        error_msg = f"Error in eligibility assessment: {str(e)}"
         logger.error(error_msg)
         state["error_messages"].append(error_msg)
         state["processing_status"] = "eligibility_error"
-        
-        # Generate fallback decision
-        state["eligibility_result"] = generate_fallback_eligibility_decision(state["collected_data"])
     
     return state
 
@@ -531,18 +602,194 @@ async def generate_recommendations(state: ConversationState) -> ConversationStat
 
 
 async def finalize_application(state: ConversationState) -> ConversationState:
-    """Finalize the application process"""
+    """Finalize the application process and store in database"""
     
     try:
-        logger.info("Finalizing application")
+        logger.info("Finalizing application and storing in database")
         
         # Prepare final decision
         final_decision = state.get("eligibility_result", {})
         state["final_decision"] = final_decision
         
+        # CRITICAL: Store application in PostgreSQL database
+        db = SessionLocal()
+        try:
+            # Prepare application data for database storage
+            collected_data = state.get("collected_data", {})
+            
+            # Map conversation data to database schema
+            application_data = {
+                "full_name": collected_data.get("name", "Unknown"),
+                "emirates_id": collected_data.get("emirates_id"),
+                "phone_number": collected_data.get("phone_number") or collected_data.get("phone"),
+                "email": collected_data.get("email"),
+                "nationality": collected_data.get("nationality", "UAE"),
+                
+                # Employment Information
+                "employment_status": _map_employment_status(collected_data.get("employment_status")),
+                "employer_name": collected_data.get("employer_name"),
+                "job_title": collected_data.get("job_title"),
+                "monthly_income": float(collected_data.get("monthly_income", 0)),
+                "employment_duration_months": collected_data.get("employment_duration_months"),
+                
+                # Family Information
+                "family_size": int(collected_data.get("family_size", 1)),
+                "dependents_count": collected_data.get("dependents_count", 0),
+                "spouse_employment_status": _map_employment_status(collected_data.get("spouse_employment_status")),
+                "spouse_monthly_income": float(collected_data.get("spouse_monthly_income", 0)),
+                
+                # Housing Information
+                "housing_status": _map_housing_status(collected_data.get("housing_status")),
+                "monthly_rent": float(collected_data.get("monthly_rent", 0)),
+                "housing_allowance": float(collected_data.get("housing_allowance", 0)),
+                
+                # Financial Information
+                "total_assets": float(collected_data.get("total_assets", 0)),
+                "total_liabilities": float(collected_data.get("total_liabilities", 0)),
+                "monthly_expenses": float(collected_data.get("monthly_expenses", 0)),
+                "savings_amount": float(collected_data.get("savings_amount", 0)),
+                "credit_score": collected_data.get("credit_score"),
+                
+                # Application Status and Processing
+                "status": ApplicationStatus.COMPLETED,
+                "submission_date": datetime.utcnow(),
+                "decision_date": datetime.utcnow(),
+                
+                # Eligibility Results
+                "is_eligible": final_decision.get("eligible", False),
+                "eligibility_score": final_decision.get("eligibility_score"),
+                "recommended_support_amount": final_decision.get("support_amount", 0),
+                "eligibility_reason": final_decision.get("reason", "Assessment completed"),
+                
+                # ML Model Results (if available)
+                "ml_eligibility_prediction": final_decision.get("ml_prediction", {}).get("eligible"),
+                "ml_support_amount_prediction": final_decision.get("ml_prediction", {}).get("support_amount"),
+                "ml_model_confidence": final_decision.get("ml_prediction", {}).get("confidence"),
+                "ml_features_used": final_decision.get("ml_prediction", {}).get("features_used"),
+                
+                # Economic Enablement
+                "recommended_programs": final_decision.get("economic_enablement", {}).get("programs", []),
+                "enablement_recommendations": final_decision.get("economic_enablement", {}).get("recommendations_text"),
+                
+                # Audit Trail
+                "created_by": "AI_WORKFLOW",
+                "updated_by": "AI_WORKFLOW",
+                
+                # Additional metadata
+                "application_metadata": {
+                    "workflow_version": "v2.0",
+                    "processing_method": "conversational_ai",
+                    "completion_time": datetime.utcnow().isoformat(),
+                    "total_messages": len(state.get("messages", [])),
+                    "documents_processed": len(state.get("uploaded_documents", []))
+                },
+                "conversation_history": state.get("messages", [])
+            }
+            
+            # Create application in database
+            db_application = DatabaseManager.create_application(db, application_data)
+            
+            # Store documents if any were uploaded
+            uploaded_documents = state.get("uploaded_documents", [])
+            processed_documents = state.get("processed_documents", [])
+            
+            for doc_path in uploaded_documents:
+                try:
+                    # Determine document type
+                    doc_type = _determine_document_type_enum(doc_path)
+                    
+                    # Create document record
+                    document_data = {
+                        "document_id": f"DOC_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.path.basename(doc_path)}",
+                        "filename": os.path.basename(doc_path),
+                        "original_filename": os.path.basename(doc_path),
+                        "document_type": doc_type,
+                        "file_path": doc_path,
+                        "file_size": os.path.getsize(doc_path) if os.path.exists(doc_path) else 0,
+                        "mime_type": _get_mime_type(doc_path),
+                        "is_processed": doc_path in processed_documents,
+                        "processing_status": "processed" if doc_path in processed_documents else "uploaded",
+                        "uploaded_by": "AI_WORKFLOW"
+                    }
+                    
+                    document = Document(
+                        application_id=db_application.id,
+                        **document_data
+                    )
+                    db.add(document)
+                    
+                except Exception as e:
+                    logger.error(f"Error storing document {doc_path}: {str(e)}")
+            
+            # Create application review record
+            review_data = {
+                "reviewer_id": "AI_SYSTEM",
+                "reviewer_name": "AI Assessment System",
+                "review_type": "automated",
+                "decision": "approved" if final_decision.get("eligible", False) else "rejected",
+                "decision_reason": final_decision.get("reason", "Automated AI assessment completed"),
+                "support_amount_recommended": final_decision.get("support_amount", 0),
+                "conditions": final_decision.get("conditions", {}),
+                "review_notes": f"Automated assessment completed via conversational AI workflow. Total conversation messages: {len(state.get('messages', []))}",
+                "risk_assessment": final_decision.get("risk_assessment", {"overall_risk_score": 0.5}),
+                "compliance_check": {
+                    "document_verification": "completed" if uploaded_documents else "not_required",
+                    "identity_verification": "completed" if collected_data.get("emirates_id") else "pending",
+                    "income_verification": "completed" if collected_data.get("monthly_income") else "pending",
+                    "eligibility_criteria": "passed" if final_decision.get("eligible", False) else "failed"
+                }
+            }
+            
+            review = ApplicationReview(
+                application_id=db_application.id,
+                **review_data
+            )
+            db.add(review)
+            
+            # Commit all database changes
+            db.commit()
+            
+            # Update state with database application ID
+            state["application_id"] = db_application.application_id
+            state["database_stored"] = True
+            
+            logger.info(f"✅ Application stored in database: {db_application.application_id}")
+            logger.info(f"   - Documents: {len(uploaded_documents)} stored")
+            logger.info(f"   - Eligibility: {final_decision.get('eligible', False)}")
+            logger.info(f"   - Support Amount: {final_decision.get('support_amount', 0)} AED")
+            
+        except Exception as e:
+            logger.error(f"❌ Database storage failed: {str(e)}")
+            db.rollback()
+            # Continue with workflow even if database storage fails
+            state["database_error"] = str(e)
+        finally:
+            db.close()
+        
         # Generate final summary message using conversation agent
         conversation_agent = ConversationAgent()
         final_response = conversation_agent._generate_eligibility_response(final_decision)
+        
+        # Add database confirmation to response if successful
+        if state.get("database_stored"):
+            # Get the stored application to access reference number
+            db = SessionLocal()
+            try:
+                db_app = DatabaseManager.get_application_by_id(db, state["application_id"])
+                if db_app:
+                    final_response += f"\n\n📋 **Your Application References:**"
+                    final_response += f"\n🔢 **Reference Number:** {db_app.reference_number} (Easy to remember!)"
+                    final_response += f"\n📱 **Quick Lookup:** Use your name + last 4 digits of phone ({db_app.phone_reference})"
+                    final_response += f"\n🆔 **Full Application ID:** {state['application_id']}"
+                    final_response += f"\n\n💡 **How to Check Status Later:**"
+                    final_response += f"\n• Use Reference Number: {db_app.reference_number}"
+                    final_response += f"\n• Use your Emirates ID: {collected_data.get('emirates_id', 'N/A')}"
+                    final_response += f"\n• Use Name + Phone: {collected_data.get('name', 'N/A')} + {db_app.phone_reference}"
+                    final_response += f"\n\n📞 **Save this message** or take a screenshot for your records!"
+                else:
+                    final_response += f"\n\n📋 Your application has been saved with ID: {state['application_id']}"
+            finally:
+                db.close()
         
         state["messages"].append({
             "role": "assistant",
@@ -557,11 +804,13 @@ async def finalize_application(state: ConversationState) -> ConversationState:
         state["workflow_history"].append({
             "step": "finalize_application",
             "final_decision": final_decision,
+            "database_stored": state.get("database_stored", False),
+            "application_id": state.get("application_id"),
             "completion_time": datetime.now().isoformat(),
             "status": "completed"
         })
         
-        logger.info(f"Application finalized. Application ID: {state['application_id']}")
+        logger.info(f"Application finalized. Application ID: {state.get('application_id', 'N/A')}")
         
     except Exception as e:
         error_msg = f"Error finalizing application: {str(e)}"
@@ -570,6 +819,80 @@ async def finalize_application(state: ConversationState) -> ConversationState:
         state["processing_status"] = "finalization_error"
     
     return state
+
+
+def _map_employment_status(status_str: str) -> EmploymentStatus:
+    """Map string employment status to enum"""
+    if not status_str:
+        return EmploymentStatus.UNEMPLOYED
+    
+    status_lower = status_str.lower()
+    if "employ" in status_lower and "un" not in status_lower:
+        return EmploymentStatus.EMPLOYED
+    elif "self" in status_lower:
+        return EmploymentStatus.SELF_EMPLOYED
+    elif "retire" in status_lower:
+        return EmploymentStatus.RETIRED
+    elif "student" in status_lower:
+        return EmploymentStatus.STUDENT
+    else:
+        return EmploymentStatus.UNEMPLOYED
+
+
+def _map_housing_status(status_str: str) -> HousingStatus:
+    """Map string housing status to enum"""
+    if not status_str:
+        return HousingStatus.RENTED
+    
+    status_lower = status_str.lower()
+    if "own" in status_lower:
+        return HousingStatus.OWNED
+    elif "family" in status_lower:
+        return HousingStatus.FAMILY_OWNED
+    elif "government" in status_lower:
+        return HousingStatus.GOVERNMENT_HOUSING
+    else:
+        return HousingStatus.RENTED
+
+
+def _determine_document_type_enum(file_path: str) -> DocumentType:
+    """Determine document type enum from file path"""
+    filename_lower = os.path.basename(file_path).lower()
+    
+    if "emirates" in filename_lower or "id" in filename_lower:
+        return DocumentType.EMIRATES_ID
+    elif "bank" in filename_lower or "statement" in filename_lower:
+        return DocumentType.BANK_STATEMENT
+    elif "salary" in filename_lower or "certificate" in filename_lower:
+        return DocumentType.SALARY_CERTIFICATE
+    elif "resume" in filename_lower or "cv" in filename_lower:
+        return DocumentType.RESUME
+    elif "asset" in filename_lower or "liabilit" in filename_lower:
+        return DocumentType.ASSETS_LIABILITIES
+    elif "credit" in filename_lower or "report" in filename_lower:
+        return DocumentType.CREDIT_REPORT
+    elif "family" in filename_lower:
+        return DocumentType.FAMILY_CERTIFICATE
+    elif "housing" in filename_lower or "contract" in filename_lower:
+        return DocumentType.HOUSING_CONTRACT
+    else:
+        return DocumentType.BANK_STATEMENT  # Default
+
+
+def _get_mime_type(file_path: str) -> str:
+    """Get MIME type from file extension"""
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_types = {
+        '.pdf': 'application/pdf',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.doc': 'application/msword',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xls': 'application/vnd.ms-excel',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }
+    return mime_types.get(ext, 'application/octet-stream')
 
 
 async def handle_completion_chat(state: ConversationState) -> ConversationState:
@@ -683,7 +1006,6 @@ def determine_next_action(state: ConversationState) -> str:
     if processing_status in [
         "waiting_for_input", 
         "waiting_for_completion_input", 
-        "completed", 
         "error",
         "validation_error",
         "eligibility_error",
@@ -693,6 +1015,11 @@ def determine_next_action(state: ConversationState) -> str:
     ]:
         logger.debug(f"Ending workflow due to status: {processing_status}")
         return "waiting"
+    
+    # CRITICAL FIX: Route completed applications to finalize_application
+    if processing_status == "completed":
+        logger.debug("Application completed, routing to finalize_application")
+        return "finalize"
     
     # Check if we're in completion phase
     if current_step == ConversationStep.COMPLETION or processing_status == "completion_chat":
@@ -724,10 +1051,6 @@ def determine_next_action(state: ConversationState) -> str:
             return "assess_eligibility"
         else:
             return "finalize"
-    
-    # Check if application is complete
-    if processing_status == "completed":
-        return "finalize"
     
     # If we have user input to process, continue conversation
     user_input = state.get("user_input")
