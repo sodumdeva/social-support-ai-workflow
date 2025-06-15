@@ -15,10 +15,8 @@ from pathlib import Path
 import pandas as pd
 from PIL import Image
 import pytesseract
-import cv2
 import numpy as np
 from PyPDF2 import PdfReader
-from docx import Document
 import openpyxl
 import sys
 

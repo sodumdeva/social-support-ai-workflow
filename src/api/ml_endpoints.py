@@ -47,15 +47,11 @@ class ModelInfo(BaseModel):
     trained: bool
 
 def get_ml_models():
-    """Get or initialize ML models instance"""
+    """Get or initialize ML models instance (singleton pattern)"""
     global ml_models
     if ml_models is None:
-        ml_models = SocialSupportMLModels()
-        try:
-            ml_models.load_models()
-            logger.info("Loaded pre-trained ML models")
-        except Exception as e:
-            logger.warning(f"Could not load pre-trained models: {e}")
+        ml_models = SocialSupportMLModels()  # Singleton - loads models only once
+        logger.info("Initialized ML models singleton instance")
     return ml_models
 
 @router.get("/status")

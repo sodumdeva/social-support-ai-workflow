@@ -12,8 +12,6 @@ import streamlit as st
 import requests
 import json
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 import os
 import sys
@@ -408,21 +406,29 @@ def submit_application(application_data):
 
 
 def show_status_page():
-    """Display application status checking page"""
+    """Display application status checking interface"""
     
-    st.markdown("## 📋 Check Application Status")
+    st.markdown("## 📊 Application Status")
+    st.markdown("Check the status of your submitted applications.")
     
-    application_id = st.text_input("Enter Application ID", placeholder="APP-YYYYMMDD-XXXXXXXX")
+    application_id = st.text_input(
+        "Application ID",
+        placeholder="Enter your application ID (e.g., APP-20241201-abc123)"
+    )
     
-    if st.button("Check Status") and application_id:
+    if st.button("🔍 Check Status") and application_id:
         check_application_status(application_id)
     
-    # If we have an application ID from session, show it
-    if hasattr(st.session_state, 'application_id'):
-        st.markdown("---")
-        st.markdown("### Recent Application")
-        if st.button(f"Check Status for {st.session_state.application_id}"):
-            check_application_status(st.session_state.application_id)
+    # Show recent applications if any exist in session state
+    if "recent_applications" in st.session_state:
+        st.markdown("### Recent Applications")
+        for app_id in st.session_state.recent_applications:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.text(app_id)
+            with col2:
+                if st.button("Check", key=f"check_{app_id}"):
+                    check_application_status(app_id)
 
 
 def check_application_status(application_id):
@@ -435,88 +441,91 @@ def check_application_status(application_id):
             if response.status_code == 200:
                 status_data = response.json()
                 
-                st.markdown("### Application Status")
+                st.success("✅ Application found!")
                 
-                # Status indicator
-                status = status_data['status']
-                if status == "completed":
-                    st.success(f"✅ Status: {status.upper()}")
-                elif status == "processing":
-                    st.info(f"⏳ Status: {status.upper()}")
-                elif status == "failed":
-                    st.error(f"❌ Status: {status.upper()}")
-                else:
-                    st.warning(f"📝 Status: {status.upper()}")
-                
-                # Details
+                # Display status information
                 col1, col2 = st.columns(2)
+                
                 with col1:
-                    st.write(f"**Application ID:** {status_data['application_id']}")
-                    st.write(f"**Submitted:** {status_data['submitted_at']}")
+                    st.metric("Status", status_data["status"].title())
+                    st.metric("Application ID", status_data["application_id"])
                 
                 with col2:
-                    processed_at = status_data.get('processed_at')
-                    if processed_at:
-                        st.write(f"**Processed:** {processed_at}")
-                    else:
-                        st.write("**Processed:** Not yet")
+                    st.metric("Submitted", status_data["submitted_at"][:10])
+                    if status_data.get("processed_at"):
+                        st.metric("Processed", status_data["processed_at"][:10])
                 
-                # If completed, show results
-                if status == "completed":
-                    if st.button("📊 View Detailed Results"):
+                # Show action buttons based on status
+                if status_data["status"] == "submitted":
+                    st.info("💡 Your application is submitted. Use the **Chat Application** page to continue the interactive process.")
+                    if st.button("🚀 Continue with Chat Interface"):
+                        st.session_state.page = "Chat Application"
+                        st.rerun()
+                
+                elif status_data["status"] == "processed":
+                    if st.button("📋 View Results"):
                         show_application_results(application_id)
-                
-                # If submitted, allow processing
-                elif status == "submitted":
-                    if st.button("🔄 Process Application"):
-                        process_application(application_id)
                         
+            elif response.status_code == 404:
+                st.error("❌ Application not found. Please check your application ID.")
             else:
-                st.error(f"Application not found: {application_id}")
+                st.error("❌ Error checking status. Please try again.")
                 
     except Exception as e:
-        st.error(f"Error checking status: {str(e)}")
+        st.error(f"❌ Error: {str(e)}")
 
 
 def show_application_results(application_id):
     """Display detailed application results"""
     
     try:
-        response = requests.get(f"{API_BASE}/applications/{application_id}/results")
-        
-        if response.status_code == 200:
-            results = response.json()
+        with st.spinner("Loading application results..."):
+            response = requests.get(f"{API_BASE}/applications/{application_id}/results")
             
-            st.markdown("### 📊 Application Results")
-            
-            # Main decision
-            if results['is_eligible']:
-                st.success(f"✅ **APPROVED** - Support Amount: {results['support_amount']} AED/month")
-            else:
-                st.error("❌ **DECLINED**")
-            
-            # Metrics
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Eligibility Score", f"{results['eligibility_score']:.2f}")
-            
-            with col2:
-                st.metric("Support Amount", f"{results['support_amount']} AED")
-            
-            with col3:
-                st.metric("Decision", "APPROVED" if results['is_eligible'] else "DECLINED")
-            
-            # Assessment details
-            if results.get('assessment_data'):
-                st.markdown("### Assessment Details")
-                st.json(results['assessment_data'])
+            if response.status_code == 200:
+                results = response.json()
                 
-        else:
-            st.error("Failed to retrieve results")
-            
+                st.markdown("### 📋 Application Results")
+                
+                # Basic information
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Application ID", results["application_id"])
+                
+                with col2:
+                    status_color = "🟢" if results.get("is_eligible") else "🔴"
+                    st.metric("Eligibility", f"{status_color} {'Eligible' if results.get('is_eligible') else 'Not Eligible'}")
+                
+                with col3:
+                    if results.get("support_amount"):
+                        st.metric("Support Amount", f"{results['support_amount']} AED/month")
+                
+                # Detailed assessment
+                if results.get("assessment_data"):
+                    st.markdown("### 📊 Assessment Details")
+                    
+                    try:
+                        assessment = json.loads(results["assessment_data"]) if isinstance(results["assessment_data"], str) else results["assessment_data"]
+                        
+                        if isinstance(assessment, dict):
+                            for key, value in assessment.items():
+                                if isinstance(value, (dict, list)):
+                                    with st.expander(f"{key.replace('_', ' ').title()}"):
+                                        st.json(value)
+                                else:
+                                    st.write(f"**{key.replace('_', ' ').title()}:** {value}")
+                        else:
+                            st.json(assessment)
+                            
+                    except Exception as e:
+                        st.write("Assessment data available but could not be parsed for display.")
+                
+            else:
+                st.error("❌ Could not load application results.")
+                
     except Exception as e:
-        st.error(f"Error retrieving results: {str(e)}")
+        st.error(f"❌ Error loading results: {str(e)}")
 
 
 def show_demo_page():
@@ -770,14 +779,12 @@ def show_eligibility_breakdown(assessment_result):
         scores.append(data.get('score', 0))
     
     if categories and scores:
-        fig = px.bar(
-            x=categories,
-            y=scores,
-            title="Eligibility Component Scores",
-            labels={'x': 'Assessment Categories', 'y': 'Score (0-1)'}
-        )
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        # Create DataFrame for Streamlit chart
+        chart_data = pd.DataFrame({
+            'Category': categories,
+            'Score': scores
+        })
+        st.bar_chart(chart_data.set_index('Category'), use_container_width=True)
     
     # Detailed breakdown
     for category, data in component_scores.items():
@@ -822,9 +829,7 @@ def show_analytics_page():
         'Approvals': approvals
     })
     
-    fig = px.line(df, x='Date', y=['Applications', 'Approvals'], 
-                  title="Daily Application and Approval Trends")
-    st.plotly_chart(fig, use_container_width=True)
+    st.line_chart(df, x='Date', y=['Applications', 'Approvals'], use_container_width=True)
     
     # Processing time distribution
     st.markdown("### Processing Time Distribution")
@@ -833,9 +838,16 @@ def show_analytics_page():
     processing_times = np.random.normal(90, 20, 1000)  # 90 seconds average
     processing_times = processing_times[processing_times > 30]  # Minimum 30 seconds
     
-    fig = px.histogram(processing_times, bins=20, 
-                       title="Processing Time Distribution (seconds)")
-    st.plotly_chart(fig, use_container_width=True)
+    # Create histogram data manually
+    hist, bin_edges = np.histogram(processing_times, bins=20)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    
+    hist_df = pd.DataFrame({
+        'Processing Time (seconds)': bin_centers,
+        'Frequency': hist
+    })
+    
+    st.line_chart(hist_df.set_index('Processing Time (seconds)'), use_container_width=True)
 
 
 def show_chat_application_page():
@@ -1052,27 +1064,6 @@ def test_database_connection():
     
     st.info("Database connection test would be implemented here.")
     # This would require backend endpoint for database testing
-
-
-def process_application(application_id):
-    """Process an application through the workflow"""
-    
-    try:
-        with st.spinner("Processing application through AI workflow..."):
-            response = requests.post(
-                f"{API_BASE}/applications/{application_id}/process",
-                timeout=120
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                st.success("✅ Application processed successfully!")
-                display_processing_results(result)
-            else:
-                st.error(f"Processing failed: {response.text}")
-                
-    except Exception as e:
-        st.error(f"Error processing application: {str(e)}")
 
 
 if __name__ == "__main__":

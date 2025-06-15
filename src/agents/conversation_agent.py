@@ -581,69 +581,37 @@ What would you like to know more about?""",
     async def _generate_llm_economic_recommendations(self, collected_data: Dict, eligibility_result: Dict) -> Dict[str, Any]:
         """Generate personalized economic enablement recommendations using LLM"""
         
-        # Build user profile for LLM
-        user_profile = self._build_user_profile_for_llm(collected_data, eligibility_result)
+        # Build concise user profile
+        employment_status = collected_data.get("employment_status", "unknown")
+        monthly_income = collected_data.get("monthly_income", 0)
+        family_size = collected_data.get("family_size", 1)
         
-        # Create comprehensive system prompt
-        system_prompt = """You are an expert economic enablement advisor for the UAE government's social support system. Your role is to provide personalized, actionable recommendations to help individuals improve their financial situation and achieve economic independence.
+        # SIMPLIFIED system prompt for faster response
+        system_prompt = """You are a UAE economic advisor. Give exactly 3 brief recommendations in 30 words total. Be extremely concise. Format: 1. [recommendation] 2. [recommendation] 3. [recommendation]"""
 
-You have access to comprehensive information about UAE-specific programs, training opportunities, job markets, and support services. Your recommendations should be:
-
-1. **Personalized** - Based on the individual's specific situation
-2. **Actionable** - Concrete steps they can take immediately
-3. **Realistic** - Achievable given their current circumstances
-4. **UAE-focused** - Relevant to the UAE job market and available programs
-5. **Comprehensive** - Cover multiple pathways to improvement
-
-Structure your response in markdown format with:
-- Brief personalized introduction
-- 3-4 key recommendation categories with specific programs/opportunities
-- Concrete next steps
-- Encouragement and motivation
-
-Focus on practical opportunities like:
-- Skills training programs available in UAE
-- Job placement services
-- Entrepreneurship support
-- Financial literacy programs
-- Career advancement opportunities
-- Government initiatives and support programs"""
-
-        # Create detailed user prompt
-        user_prompt = f"""Based on the following user profile, provide comprehensive economic enablement recommendations:
-
-**User Profile:**
-{user_profile}
-
-**Current Situation Analysis:**
-- Employment Status: {collected_data.get('employment_status', 'Unknown')}
-- Monthly Income: {collected_data.get('monthly_income', 0):,.0f} AED
-- Family Size: {collected_data.get('family_size', 1)} people
-- Housing: {collected_data.get('housing_status', 'Unknown')}
-- Eligibility Status: {'Approved' if eligibility_result.get('eligible') else 'Not Approved'}
-
-Please provide personalized economic enablement recommendations that will help this individual improve their financial situation and work toward economic independence. Include specific programs, training opportunities, and actionable steps they can take in the UAE."""
+        # SIMPLIFIED user prompt
+        user_prompt = f"""Person: {employment_status}, {monthly_income} AED/month, {family_size} people.
+        
+3 brief income recommendations (30 words max):"""
 
         try:
-            # Call LLM using the base agent's invoke_llm method
+            # Call LLM with simplified prompts
             llm_result = await self.invoke_llm(user_prompt, system_prompt)
             
             if llm_result.get("status") == "success" and llm_result.get("response"):
-                # Format the LLM response
-                formatted_response = "## 🚀 Personalized Economic Enablement Recommendations\n\n"
+                # Format the LLM response simply
+                formatted_response = "## 🚀 Economic Enablement Recommendations\n\n"
                 formatted_response += llm_result["response"]
                 
                 return {
                     "status": "success",
                     "response": formatted_response,
-                    "source": "llm_generated",
-                    "model": llm_result.get("model", "unknown"),
-                    "processing_time": llm_result.get("processing_time_ms", 0)
+                    "source": "llm_generated"
                 }
             else:
                 return {
                     "status": "error",
-                    "error": llm_result.get("error", "LLM response was empty"),
+                    "error": llm_result.get("error", "LLM response failed"),
                     "response": ""
                 }
                 
@@ -822,7 +790,17 @@ Please provide personalized economic enablement recommendations that will help t
         
         message_lower = user_message.lower()
         
-        # Check for specific question types
+        # CRITICAL FIX: If we're in completion step, don't handle economic enablement here
+        # Let the completion conversation handler deal with it
+        if current_step == ConversationStep.COMPLETION:
+            # This should not happen - completion questions should be routed to completion handler
+            logger.warning(f"General inquiry called during completion step: {user_message}")
+            return {
+                "message": "I'm processing your question. Please wait a moment...",
+                "state_update": {}
+            }
+        
+        # Check for specific question types (only for non-completion steps)
         if any(word in message_lower for word in ["economic", "enablement", "recommendations", "programs", "training", "job"]):
             return {
                 "message": "I'd be happy to help with economic enablement recommendations! However, I need to complete your application assessment first to provide personalized recommendations. Let's continue with the application process.",

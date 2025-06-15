@@ -4,11 +4,17 @@ Configuration settings for Social Support AI Workflow
 import os
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings using Pydantic BaseSettings"""
+    
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        protected_namespaces=('settings_',)  # Fix the protected namespace warning
+    )
     
     # Application
     app_name: str = Field(default="Social Support AI Workflow", env="APP_NAME")
@@ -34,7 +40,7 @@ class Settings(BaseSettings):
     # File Storage
     upload_dir: str = Field(default="data/uploads", env="UPLOAD_DIR")
     processed_dir: str = Field(default="data/processed", env="PROCESSED_DIR")
-    model_dir: str = Field(default="models", env="MODEL_DIR")
+    models_directory: str = Field(default="models", env="MODEL_DIR")  # Renamed to avoid conflict
     
     # Security
     secret_key: str = Field(default="your-secret-key-here", env="SECRET_KEY")
@@ -51,10 +57,6 @@ class Settings(BaseSettings):
     max_file_size_mb: int = Field(default=50, env="MAX_FILE_SIZE_MB")
     max_files_per_request: int = Field(default=10, env="MAX_FILES_PER_REQUEST")
     processing_timeout_seconds: int = Field(default=300, env="PROCESSING_TIMEOUT_SECONDS")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 # Global settings instance
@@ -80,8 +82,8 @@ def get_processed_path() -> str:
 
 def get_model_path() -> str:
     """Get model directory path"""
-    os.makedirs(settings.model_dir, exist_ok=True)
-    return settings.model_dir
+    os.makedirs(settings.models_directory, exist_ok=True)
+    return settings.models_directory
 
 
 def get_chroma_path() -> str:

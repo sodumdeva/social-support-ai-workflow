@@ -301,6 +301,35 @@ def handle_button_click(button_value: str):
             st.session_state.conversation_state
         )
         
+        # CRITICAL: Check if this is a restart scenario
+        state_update = response.get("state_update", {})
+        if (state_update.get("current_step") == "name_collection" and 
+            state_update.get("collected_data") == {} and
+            "start" in button_value.lower() and "new" in button_value.lower()):
+            
+            # This is a restart - reset frontend state completely
+            st.session_state.conversation_state = {
+                "current_step": "name_collection",
+                "collected_data": {},
+                "uploaded_documents": [],
+                "application_id": None
+            }
+            
+            # Keep only the restart message and response
+            restart_messages = [
+                {
+                    "role": "user",
+                    "content": button_value
+                },
+                {
+                    "role": "assistant", 
+                    "content": response.get("message", "I'd be happy to help you start a new application! Let's begin fresh. What's your full name?")
+                }
+            ]
+            st.session_state.conversation_messages = restart_messages
+            st.rerun()
+            return
+        
         # Add assistant response only if there is a message
         if response.get("message"):
             st.session_state.conversation_messages.append({
@@ -341,21 +370,50 @@ def handle_user_input(prompt: str):
             st.session_state.conversation_state
         )
         
+        # CRITICAL: Check if this is a restart scenario
+        state_update = response.get("state_update", {})
+        if (state_update.get("current_step") == "name_collection" and 
+            state_update.get("collected_data") == {} and
+            "start" in prompt.lower() and "new" in prompt.lower()):
+            
+            # This is a restart - reset frontend state completely
+            st.session_state.conversation_state = {
+                "current_step": "name_collection",
+                "collected_data": {},
+                "uploaded_documents": [],
+                "application_id": None
+            }
+            
+            # Keep only the restart message and response
+            restart_messages = [
+                {
+                    "role": "user",
+                    "content": prompt
+                },
+                {
+                    "role": "assistant", 
+                    "content": response.get("message", "I'd be happy to help you start a new application! Let's begin fresh. What's your full name?")
+                }
+            ]
+            st.session_state.conversation_messages = restart_messages
+            st.rerun()
+            return
+        
         # Add assistant response only if there is a message
         if response.get("message"):
             st.session_state.conversation_messages.append({
                 "role": "assistant",
                 "content": response["message"]
             })
-        
-        # Update conversation state
-        st.session_state.conversation_state.update(response.get("state_update", {}))
-        
-        # Check if application is complete
-        if response.get("application_complete"):
-            st.session_state.conversation_state["application_complete"] = True
-            show_final_results(response.get("final_decision"))
-        
+            
+            # Update conversation state
+            st.session_state.conversation_state.update(response.get("state_update", {}))
+            
+            # Check if application is complete
+            if response.get("application_complete"):
+                st.session_state.conversation_state["application_complete"] = True
+                show_final_results(response.get("final_decision"))
+            
     except Exception as e:
         st.session_state.conversation_messages.append({
             "role": "assistant",
@@ -405,9 +463,19 @@ def show_help_info():
     """)
 
 def process_chat_message(user_message: str, conversation_history: List[Dict], conversation_state: Dict) -> Dict:
-    """Process user message through the conversation agent"""
+    """Process chat message through the API"""
     
     try:
+        # CRITICAL FIX: Increase timeout for completion conversations
+        # LLM-generated economic enablement recommendations can take 60+ seconds
+        current_step = conversation_state.get("current_step", "")
+        is_completion = (current_step == "completion" or 
+                        conversation_state.get("processing_status") == "completion_chat" or
+                        conversation_state.get("eligibility_result") is not None)
+        
+        # Use longer timeout for completion conversations with LLM
+        timeout_seconds = 120 if is_completion else 60  # 2 minutes for completion, 1 minute for others
+        
         response = requests.post(
             f"{API_BASE}/conversation/message",
             json={
@@ -415,7 +483,7 @@ def process_chat_message(user_message: str, conversation_history: List[Dict], co
                 "conversation_history": conversation_history,
                 "conversation_state": conversation_state
             },
-            timeout=30
+            timeout=timeout_seconds
         )
         
         if response.status_code == 200:

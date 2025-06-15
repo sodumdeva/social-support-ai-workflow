@@ -25,7 +25,7 @@ class LocalLLMService:
         self.model_config = {
             "temperature": 0.7,
             "top_p": 0.9,
-            "max_tokens": 1000,
+            "max_tokens": 100,
             "stream": False
         }
     
@@ -113,7 +113,7 @@ class LocalLLMService:
                 async with session.post(
                     f"{self.base_url}/api/generate",
                     json=request_data,
-                    timeout=aiohttp.ClientTimeout(total=60)
+                    timeout=aiohttp.ClientTimeout(total=180)
                 ) as response:
                     
                     if response.status == 200:
