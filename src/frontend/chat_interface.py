@@ -44,33 +44,32 @@ def show_chat_interface():
     # Interactive buttons section based on current step
     show_interactive_buttons()
     
-    # Document upload section (always visible)
+    # Show current progress and status check in sidebar
     with st.sidebar:
-        st.markdown("### 📄 Upload Documents")
-        st.markdown("You can upload documents anytime during our conversation:")
+        # Application Status Check section
+        st.markdown("### 📋 Check Application Status")
+        st.markdown("Use your Emirates ID to find your application:")
         
-        uploaded_files = st.file_uploader(
-            "Choose files",
-            accept_multiple_files=True,
-            type=['pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'xls', 'docx'],
-            help="Supported: Bank statements, Emirates ID, Resume, Credit reports, Assets/liabilities"
+        emirates_id = st.text_input(
+            "Emirates ID:",
+            placeholder="784199012345678",
+            key="sidebar_emirates_input",
+            help="Enter your 15-digit Emirates ID number"
         )
         
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                if uploaded_file not in st.session_state.conversation_state["uploaded_documents"]:
-                    # Process uploaded document
-                    document_response = process_document_upload(uploaded_file)
-                    st.session_state.conversation_state["uploaded_documents"].append(uploaded_file)
-                    
-                    # Add document processing message to chat
-                    st.session_state.conversation_messages.append({
-                        "role": "assistant",
-                        "content": document_response
-                    })
-                    st.rerun()
+        if st.button("🔍 Find Application", key="sidebar_search_btn", use_container_width=True):
+            if emirates_id:
+                lookup_data = {"emirates_id": emirates_id}
+                result = lookup_application_by_method(lookup_data)
+                
+                if result and result.get("found"):
+                    display_application_status_sidebar(result["application"])
+                else:
+                    st.error("❌ Application not found. Please check your Emirates ID.")
+            else:
+                st.warning("Please enter your Emirates ID")
         
-        # Show current progress
+        st.markdown("---")
         show_progress_sidebar()
     
     # Chat input
@@ -138,6 +137,43 @@ def show_interactive_buttons():
         with col4:
             if st.button("🏖️ Retired", use_container_width=True, key="btn_retired"):
                 handle_button_click("retired")
+    
+    # Income Assessment Buttons
+    elif current_step == "income_assessment":
+        st.markdown("### 💰 Select Your Monthly Salary Range (AED):")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("💵 <1000", use_container_width=True, key="btn_income_low"):
+                handle_button_click("700")
+        
+        with col2:
+            if st.button("💰 1,000 - 5,000", use_container_width=True, key="btn_income_mid"):
+                handle_button_click("3000")
+        
+        with col3:
+            if st.button("💎 5,000 - 10,000", use_container_width=True, key="btn_income_high"):
+                handle_button_click("8000")
+        
+        with col4:
+            if st.button("🏆 10,000+", use_container_width=True, key="btn_income_very_high"):
+                handle_button_click("12000")
+        
+        # Additional quick options
+        st.markdown("##### Quick options:")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("No Income", key="btn_no_income", help="Currently no income"):
+                handle_button_click("0")
+        
+        with col2:
+            if st.button("5,000 AED", key="btn_income_5k", help="Exact amount"):
+                handle_button_click("5000")
+        
+        with col3:
+            if st.button("10,000 AED", key="btn_income_10k", help="Exact amount"):
+                handle_button_click("10000")
     
     # Family Size Buttons
     elif current_step == "family_details":
@@ -823,4 +859,47 @@ def process_chat_message_from_main(prompt: str, messages: List[Dict]) -> str:
         return result.get("message", "I'm here to help with your application questions.")
         
     except Exception as e:
-        return generate_fallback_response(prompt, {}).get("message", "How can I help you today?") 
+        return generate_fallback_response(prompt, {}).get("message", "How can I help you today?")
+
+def lookup_application_by_method(lookup_data):
+    """Lookup application using the flexible API endpoint"""
+    try:
+        response = requests.post(f"{API_BASE}/applications/lookup", json=lookup_data)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"API Error: {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Connection error: {str(e)}")
+        return None
+
+def display_application_status_sidebar(app_data):
+    """Display application status information in sidebar"""
+    
+    st.success("✅ Application Found!")
+    
+    # Main info
+    st.markdown(f"**👤 {app_data['full_name']}**")
+    st.markdown(f"**Reference:** `{app_data['reference_number']}`")
+    
+    # Status
+    status = app_data['status']
+    if status == 'completed':
+        st.success("✅ COMPLETED")
+    elif status == 'under_review':
+        st.warning("⏳ UNDER REVIEW")
+    else:
+        st.info(f"📝 {status.upper()}")
+    
+    # Support amount
+    if app_data.get('is_eligible'):
+        st.success(f"💰 {app_data.get('support_amount', 0):.0f} AED/month")
+    else:
+        st.error("❌ Not Eligible")
+    
+    # Timeline
+    if app_data.get('submitted_at'):
+        from datetime import datetime
+        submitted_date = datetime.fromisoformat(app_data['submitted_at'].replace('Z', '+00:00'))
+        st.write(f"**Submitted:** {submitted_date.strftime('%B %d, %Y')}") 
