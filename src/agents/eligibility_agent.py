@@ -36,7 +36,13 @@ except ImportError as e:
 
 
 class EligibilityAssessmentAgent(BaseAgent):
-    """Agent specialized in assessing eligibility using ML models + rule-based fallback"""
+    """
+    Eligibility Assessment Agent with ML and Rule-Based Analysis
+    
+    Performs eligibility assessment using scikit-learn ML models and rule-based logic.
+    Generates support amount predictions and economic enablement recommendations
+    via local LLM integration. Stores results in database with audit trails.
+    """
     
     def __init__(self):
         super().__init__("EligibilityAssessmentAgent")

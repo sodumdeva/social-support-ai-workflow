@@ -1,5 +1,54 @@
 """
-Configuration settings for Social Support AI Workflow
+Configuration Management for Social Support AI Workflow
+
+Comprehensive settings management using Pydantic BaseSettings for database connections,
+AI model settings (Ollama), file handling, API configuration, and environment-specific
+settings with .env file support.
+
+Configuration Categories:
+    - Database: PostgreSQL connection settings with pooling and SSL options
+    - AI Models: Local LLM configuration for Ollama integration
+    - File Handling: Upload paths, size limits, and supported formats
+    - API Settings: Server configuration, CORS, and security settings
+    - Logging: Log levels, file paths, and rotation settings
+    - OCR: Tesseract configuration and preprocessing options
+
+Environment Support:
+    - Development: Local development with debug logging
+    - Production: Optimized settings with security hardening
+    - Testing: Isolated test environment with mock services
+    - Docker: Containerized deployment configuration
+
+Key Features:
+    - Environment variable override support
+    - Validation of critical configuration values
+    - Default fallbacks for missing settings
+    - Type conversion and validation
+    - Secure handling of sensitive credentials
+
+AI Configuration:
+    - Ollama LLM model selection and parameters
+    - Model-specific settings for different use cases
+    - Timeout and retry configurations
+    - Fallback model specifications
+    - Performance tuning parameters
+
+Database Configuration:
+    - Connection pooling for optimal performance
+    - SSL/TLS settings for secure connections
+    - Transaction isolation levels
+    - Connection timeout and retry logic
+    - Migration and backup settings
+
+File Handling:
+    - Upload directory management
+    - File size and type restrictions
+    - Temporary file cleanup policies
+    - Document processing pipeline settings
+    - Storage optimization configurations
+
+The configuration system supports both environment variables and configuration
+files, with environment variables taking precedence for deployment flexibility.
 """
 import os
 from typing import Optional

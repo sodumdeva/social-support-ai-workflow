@@ -10,6 +10,7 @@ joblib>=1.5.1
 # Computer Vision and Document Processing
 opencv-python>=4.11.0
 Pillow>=11.2.1
+pytesseract>=0.3.10
 
 # Web Framework and API
 fastapi>=0.115.9
@@ -19,6 +20,8 @@ starlette>=0.45.3
 
 # Database
 sqlalchemy>=2.0.41
+psycopg2-binary>=2.9.9
+alembic>=1.13.1
 
 # Data Validation
 pydantic>=2.11.5
@@ -32,19 +35,37 @@ altair>=4.2.2
 # HTTP and Networking
 requests>=2.32.3
 httpx>=0.28.1
+aiohttp>=3.9.1
 
 # Async and Concurrency
 tenacity>=9.1.2
+asyncio-mqtt>=0.16.2
+
+# Logging
+loguru>=0.7.2
 
 # Utilities
 click>=8.1.8
 python-dateutil>=2.9.0
 pytz>=2025.2
 toml>=0.10.2
+python-dotenv>=1.0.0
+
+# File handling
+openpyxl>=3.1.2
+xlrd>=2.0.1
 
 # Development and Testing
-pytest
-pytest-asyncio
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
 
 # Optional: For enhanced functionality
-ollama
+ollama>=0.1.7
+
+# Additional ML and AI dependencies
+transformers>=4.36.0
+torch>=2.1.0
+sentence-transformers>=2.2.2
+
+# Environment and configuration
+pydantic-settings>=2.1.0

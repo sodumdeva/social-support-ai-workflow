@@ -1,11 +1,11 @@
 """
-FastAPI main application for Social Support AI Workflow
+Social Support AI Workflow - FastAPI Backend
 
-Provides REST API endpoints for:
-- Conversation-based application processing
-- Document upload during conversation
-- Application status checking
-- Results retrieval
+FastAPI application providing RESTful APIs for conversational application processing.
+Integrates LangGraph workflow, PostgreSQL database, local LLM processing, and 
+document handling with OCR and multimodal analysis.
+
+Core endpoints: /conversation/message, /conversation/upload-document, application management.
 """
 import os
 import uuid

@@ -25,7 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 class SocialSupportMLModels:
-    """Simplified ML Models for Social Support Assessment"""
+    """
+    ML Models for Social Support Eligibility Assessment
+    
+    Implements scikit-learn Random Forest models for eligibility classification
+    and support amount prediction. Uses singleton pattern for efficient model
+    loading and provides automatic training with synthetic data generation.
+    """
     
     _instance = None  # Singleton pattern
     

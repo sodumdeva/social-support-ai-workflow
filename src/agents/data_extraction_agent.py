@@ -36,7 +36,13 @@ from src.data.document_processor import DocumentProcessor
 
 
 class DataExtractionAgent(BaseAgent):
-    """Enhanced Data Extraction Agent using Ollama multimodal LLM for document processing"""
+    """
+    Document Processing Agent with OCR and LLM Analysis
+    
+    Processes various document types (Emirates ID, bank statements, resumes, etc.)
+    using Tesseract OCR and local LLM models for structured data extraction.
+    Performs verification against user-provided information.
+    """
     
     def __init__(self):
         super().__init__("DataExtractionAgent")

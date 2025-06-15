@@ -1,8 +1,15 @@
 """
 LangGraph Workflow for Social Support AI System
 
-Implements state-based conversation workflow using LangGraph for managing
-the conversational application process with proper state transitions.
+State-based conversation workflow using LangGraph for managing social support applications.
+Integrates conversational AI (Ollama LLMs), document processing (OCR + LLM), ML-based 
+eligibility assessment, and PostgreSQL database storage.
+
+Main components:
+- Conversation flow management through defined steps
+- Document processing with OCR and LLM analysis  
+- ML model integration for eligibility decisions
+- Database storage with audit trails
 """
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Dict, Optional, Any, Annotated
@@ -41,7 +48,12 @@ demo_logger = WorkflowLogger("workflow")
 
 
 class ConversationState(TypedDict):
-    """State structure for the conversation workflow"""
+    """
+    State structure for the LangGraph conversation workflow.
+    
+    Contains conversation messages, user data, processing status, and workflow history
+    for managing the complete application process through state transitions.
+    """
     messages: Annotated[List[Dict], operator.add]
     collected_data: Dict
     current_step: str
@@ -54,10 +66,18 @@ class ConversationState(TypedDict):
     error_messages: Annotated[List[str], operator.add]
     user_input: Optional[str]
     last_agent_response: Optional[str]
+    processed_documents: List[str]
+    validation_results: Dict
 
 
 def create_conversation_workflow():
-    """Create LangGraph workflow for conversational application processing"""
+    """
+    Create LangGraph workflow for conversational application processing.
+    
+    Builds state-based workflow with nodes for conversation, document processing,
+    validation, eligibility assessment, and database storage. Uses conditional
+    routing based on processing status and conversation steps.
+    """
     
     workflow = StateGraph(ConversationState)
     
@@ -191,7 +211,12 @@ async def initialize_conversation(state: ConversationState) -> ConversationState
 
 
 async def handle_user_message(state: ConversationState) -> ConversationState:
-    """Handle user message through conversation agent"""
+    """
+    Process user messages through ConversationAgent and manage state transitions.
+    
+    Handles message processing, conversation flow, restart scenarios, and determines
+    next processing status for workflow routing. Clears user input after processing.
+    """
     
     try:
         user_input = state.get("user_input")
@@ -241,28 +266,31 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
                     state[key] = value
         
         # CRITICAL: Handle restart scenario when step changes to NAME_COLLECTION
-        if state["current_step"] == ConversationStep.NAME_COLLECTION and "state_update" in response:
-            # This is a restart - reset all relevant state
-            if response["state_update"].get("collected_data") == {}:
-                logger.info("Detected restart request - resetting conversation state")
-                state["collected_data"] = {}
-                state["eligibility_result"] = None
-                state["final_decision"] = None
-                state["uploaded_documents"] = []
-                state["processed_documents"] = []
-                state["processing_status"] = "restarting"
-                
-                # Log the restart
-                state["workflow_history"].append({
-                    "step": "restart_conversation",
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "completed",
-                    "message": "Conversation restarted"
-                })
-                
-                # Clear user_input and return immediately to prevent further processing
-                state["user_input"] = None
-                return state
+        # FIXED: Only trigger restart if explicitly requested, not on normal flow changes
+        if (state["current_step"] == ConversationStep.NAME_COLLECTION and 
+            "state_update" in response and 
+            response["state_update"].get("collected_data") == {} and
+            user_input and "start new" in user_input.lower()):
+            # This is an explicit restart request - reset all relevant state
+            logger.info("Detected explicit restart request - resetting conversation state")
+            state["collected_data"] = {}
+            state["eligibility_result"] = None
+            state["final_decision"] = None
+            state["uploaded_documents"] = []
+            state["processed_documents"] = []
+            state["processing_status"] = "restarting"
+            
+            # Log the restart
+            state["workflow_history"].append({
+                "step": "restart_conversation",
+                "timestamp": datetime.now().isoformat(),
+                "status": "completed",
+                "message": "Conversation restarted"
+            })
+            
+            # Clear user_input and return immediately to prevent further processing
+            state["user_input"] = None
+            return state
         
         # CRITICAL: Determine processing status based on response
         if response.get("application_complete"):
@@ -332,7 +360,12 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
 
 
 async def process_documents(state: ConversationState) -> ConversationState:
-    """Process uploaded documents with detailed logging and data verification"""
+    """
+    Process uploaded documents using OCR and LLM analysis for data extraction.
+    
+    Combines Tesseract OCR with local LLM models to extract structured data from
+    documents, performs verification against user data, and updates workflow state.
+    """
     
     try:
         demo_logger.log_step("DOCUMENT_PROCESSING", "🚀 Starting document processing workflow")

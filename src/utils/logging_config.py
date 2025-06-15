@@ -1,5 +1,9 @@
 """
-Logging configuration for Social Support AI Workflow
+Logging Configuration for Social Support AI Workflow
+
+Advanced logging setup with structured logging, workflow tracking, and demo-friendly
+output formatting. Provides standard loggers and specialized WorkflowLogger for
+monitoring application pipeline with color-coded console output.
 """
 import logging
 import sys

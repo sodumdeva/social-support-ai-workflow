@@ -42,7 +42,13 @@ class ConversationStep:
 
 
 class ConversationAgent(BaseAgent):
-    """Manages conversational flow for application submission"""
+    """
+    Conversational Agent for Social Support Application Processing
+    
+    Manages conversation flow through defined steps (name, income, documents, etc.),
+    processes user input with local LLM integration, and coordinates document upload
+    and eligibility assessment workflows.
+    """
     
     def __init__(self):
         super().__init__("ConversationAgent")

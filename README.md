@@ -51,45 +51,98 @@ This system provides an intelligent, conversational interface for citizens to ap
 
 ### Prerequisites
 
-- Python 3.8+
-- Node.js 16+
-- PostgreSQL 12+
-- Ollama (for LLM)
-- Tesseract OCR
+- **Python**: 3.8+ (3.11 recommended)
+- **Node.js**: 16.0+ 
+- **PostgreSQL**: 12.0+
+- **Git**: Latest version
+- **System Requirements**: 8GB+ RAM, 20GB+ free disk space
 
-### Installation
+### 🎯 One-Command Installation (Recommended)
 
-1. **Clone the repository**
+```bash
+# Clone the repository
+git clone <repository-url>
+cd social-support-ai-workflow
+
+# Run complete automated setup (installs everything)
+python scripts/complete_setup.py
+```
+
+This automated script will:
+- ✅ Install all system dependencies (Python, Node.js, PostgreSQL, Tesseract)
+- ✅ Set up Python virtual environment with all packages
+- ✅ Create and initialize PostgreSQL database
+- ✅ Install Ollama and download LLM models (llama2, codellama, mistral, phi)
+- ✅ Configure Tesseract OCR
+- ✅ Install frontend dependencies
+- ✅ Generate configuration files
+- ✅ Train ML models
+- ✅ Run system tests
+
+**Estimated time**: 30-60 minutes (depending on internet speed for model downloads)
+
+### 📝 Manual Installation (Step-by-Step)
+
+If you prefer manual installation or the automated script fails, see the comprehensive [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) for detailed step-by-step instructions.
+
+#### Quick Manual Setup:
+
+1. **Install System Dependencies**
    ```bash
-   git clone <repository-url>
-   cd social-support-ai-workflow
+   # macOS
+   brew install python@3.11 node postgresql tesseract git
+   
+   # Ubuntu/Debian
+   sudo apt install python3.11 python3.11-pip nodejs npm postgresql tesseract-ocr git
    ```
 
-2. **Install Python dependencies**
+2. **Setup Python Environment**
    ```bash
+   python3.11 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install --upgrade pip
    pip install -r requirements.txt
    ```
 
-3. **Install frontend dependencies**
+3. **Setup Database**
+   ```bash
+   # Create database
+   sudo -u postgres createdb social_support_db
+   python scripts/setup_database.py
+   ```
+
+4. **Install Local LLMs (Ollama)**
+   ```bash
+   # Install Ollama
+   curl -fsSL https://ollama.ai/install.sh | sh
+   
+   # Start Ollama service
+   ollama serve &
+   
+   # Install models (this takes time - models are 3-4GB each)
+   ollama pull llama2      # Primary conversational model
+   ollama pull codellama   # Data extraction model  
+   ollama pull mistral     # Advanced reasoning model
+   ollama pull phi         # Lightweight fallback model
+   ```
+
+5. **Setup OCR**
+   ```bash
+   python scripts/install_tesseract.py
+   ```
+
+6. **Frontend Setup**
    ```bash
    cd src/frontend
    npm install
    cd ../..
    ```
 
-4. **Setup database**
+7. **Configuration**
    ```bash
-   python scripts/setup_database.py
-   ```
-
-5. **Install Tesseract OCR**
-   ```bash
-   python scripts/install_tesseract.py
-   ```
-
-6. **Setup AI models**
-   ```bash
-   python scripts/setup_ai_models.py
+   # Copy and edit environment file
+   cp .env.example .env
+   # Edit .env with your database credentials and settings
    ```
 
 ### Running the Application
@@ -104,7 +157,7 @@ python start_system.py
 # Terminal 1: Start API
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Terminal 2: Start Frontend
+# Terminal 2: Start Frontend  
 cd src/frontend && npm start
 ```
 
@@ -121,7 +174,7 @@ cd src/frontend && npm start
 Create a `.env` file in the root directory:
 
 ```env
-# Database
+# Database Configuration
 DATABASE_URL=postgresql://username:password@localhost:5432/social_support_db
 
 # API Configuration
@@ -129,14 +182,17 @@ API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=true
 
-# File Upload
+# File Upload Configuration
 MAX_FILE_SIZE_MB=10
 UPLOAD_PATH=data/uploads
 
-# AI Configuration
+# AI Configuration - Local LLM Setup
 OLLAMA_BASE_URL=http://localhost:11434
 LLM_MODEL=llama2
 TESSERACT_PATH=/usr/bin/tesseract
+
+# Security
+SECRET_KEY=your-secret-key-here
 ```
 
 ### AI Configuration
@@ -147,16 +203,27 @@ The system uses `ai_config.json` for AI model settings:
 {
   "llm": {
     "provider": "ollama",
-    "model": "llama2",
-    "base_url": "http://localhost:11434"
+    "models": {
+      "conversation": "llama2",
+      "data_extraction": "codellama", 
+      "reasoning": "mistral",
+      "fallback": "phi"
+    },
+    "base_url": "http://localhost:11434",
+    "generation_config": {
+      "temperature": 0.7,
+      "max_tokens": 2048,
+      "timeout_seconds": 180
+    }
   },
   "ocr": {
     "engine": "tesseract",
-    "confidence_threshold": 60
-  },
-  "ml_models": {
-    "eligibility_model": "src/models/eligibility_model.joblib",
-    "support_amount_model": "src/models/support_amount_model.joblib"
+    "confidence_threshold": 60,
+    "preprocessing": {
+      "resize_factor": 2.0,
+      "denoise": true,
+      "deskew": true
+    }
   }
 }
 ```

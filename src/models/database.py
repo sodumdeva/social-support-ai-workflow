@@ -1,12 +1,13 @@
 """
-Database models and configuration for Social Support AI Workflow
+Database Models for Social Support AI Workflow
 
-Production-ready PostgreSQL implementation with:
-- Advanced SQLAlchemy models with relationships
-- Connection pooling and performance optimization
-- JSON fields for flexible document storage
-- Audit trails and timestamps
-- Database migrations support
+PostgreSQL database schema for social support applications including:
+- Applications: Core application data with user information and assessment results
+- Documents: Document storage with processing status and extracted data  
+- ApplicationReviews: Decision audit trail with reviewer information
+- MLPredictions: Machine learning model predictions and confidence scores
+
+Features comprehensive audit trails, ML prediction storage, and document management.
 """
 
 import os
@@ -75,7 +76,13 @@ class HousingStatus(enum.Enum):
 
 
 class Application(Base):
-    """Enhanced Application model with comprehensive fields and relationships"""
+    """
+    Application Model for Social Support System
+    
+    Stores complete application data including personal information, employment details,
+    family information, financial data, and assessment results. Integrates with
+    LangGraph workflow and ML model predictions.
+    """
     __tablename__ = "applications"
     
     # Primary identification
