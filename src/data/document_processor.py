@@ -20,6 +20,12 @@ from PyPDF2 import PdfReader
 import openpyxl
 import sys
 
+# Add OpenCV import for image preprocessing
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
@@ -145,6 +151,19 @@ class DocumentProcessor:
         try:
             logger.info(f"Starting image processing for: {file_path}")
             
+            # Check if OpenCV is available
+            if cv2 is None:
+                logger.warning("OpenCV (cv2) not available")
+                return {
+                    'type': 'image',
+                    'text': '',
+                    'error': 'OpenCV not available - required for image preprocessing',
+                    'ocr_confidence': 0,
+                    'image_dimensions': None,
+                    'detected_text_blocks': 0,
+                    'installation_note': 'To enable image processing, install OpenCV: pip install opencv-python'
+                }
+            
             # Check if tesseract is available
             try:
                 import pytesseract
@@ -216,6 +235,11 @@ class DocumentProcessor:
                     'macOS': 'brew install tesseract',
                     'Ubuntu/Debian': 'sudo apt-get install tesseract-ocr',
                     'Windows': 'Download from: https://github.com/UB-Mannheim/tesseract/wiki'
+                }
+            elif "cv2" in error_msg.lower() or "opencv" in error_msg.lower():
+                error_msg = "OpenCV not available. To process images, please install OpenCV."
+                installation_help = {
+                    'pip': 'pip install opencv-python'
                 }
             else:
                 installation_help = {}

@@ -1,0 +1,22 @@
+BATCH IMAGE PROCESSING SUMMARY REPORT
+==================================================
+
+Generated: 2025-06-15T20:46:17.102205
+Total Images: 1
+Successful: 1
+Failed: 0
+Success Rate: 100.0%
+
+EXTRACTION STATISTICS:
+Names Found: 31
+Salaries Found: 24
+Emirates IDs: 0
+Avg Confidence: 82.9%
+
+INDIVIDUAL RESULTS:
+1. UAE-Dubai-Emirates-NBD.jpg:
+   Name: JOHN CITIZEN Branch Baniyas Road
+   Salary: 10,000.00 AED
+   Emirates ID: No
+   Confidence: 82.9%
+

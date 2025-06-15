@@ -2,12 +2,10 @@
 FastAPI main application for Social Support AI Workflow
 
 Provides REST API endpoints for:
-- Application submission
-- Document upload
-- Application processing
-- Status checking
+- Conversation-based application processing
+- Document upload during conversation
+- Application status checking
 - Results retrieval
-- Machine Learning model operations
 """
 import os
 import uuid
@@ -33,7 +31,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from src.utils.logging_config import get_logger
 
 # Setup logging
-logger = get_logger("api")
+logger = get_logger("api_main")
 
 from config import settings, get_upload_path
 from src.models.database import get_db, Application, Document
@@ -43,14 +41,6 @@ from src.agents.data_extraction_agent import DataExtractionAgent
 from src.agents.eligibility_agent import EligibilityAssessmentAgent
 from src.workflows.langgraph_workflow import create_conversation_workflow, ConversationState
 from src.models.database import DatabaseManager
-
-# Import ML endpoints
-try:
-    from src.api.ml_endpoints import router as ml_router
-    ML_ENDPOINTS_AVAILABLE = True
-except ImportError:
-    ML_ENDPOINTS_AVAILABLE = False
-    print("Warning: ML endpoints not available")
 
 # Pydantic models for API
 class ApplicationData(BaseModel):
@@ -62,7 +52,6 @@ class ApplicationData(BaseModel):
     monthly_income: Optional[float] = None
     employment_status: Optional[str] = None
     family_size: int = 1
-    # Removed fields that don't exist in database model
 
 
 class ApplicationStatus(BaseModel):
@@ -74,9 +63,9 @@ class ApplicationStatus(BaseModel):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Social Support AI Workflow API",
-    description="AI-powered social support application processing system with ML models",
-    version="1.0.0"
+    title="Social Support AI Workflow",
+    description="AI-powered social support application processing system",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -87,10 +76,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Include ML endpoints router if available
-if ML_ENDPOINTS_AVAILABLE:
-    app.include_router(ml_router)
 
 # Initialize agents
 synthetic_generator = SyntheticDataGenerator()
@@ -130,50 +115,28 @@ async def root():
     """Root endpoint with API information"""
     
     endpoints = {
-        "submit_application": "/applications/submit",
-        "upload_documents": "/applications/{application_id}/documents",
-        "get_status": "/applications/{application_id}/status",
-        "get_results": "/applications/{application_id}/results",
         "conversation_message": "/conversation/message",
         "conversation_upload": "/conversation/upload-document",
+        "get_status": "/applications/{application_id}/status",
+        "lookup_application": "/applications/lookup",
+        "health_check": "/health",
         "generate_synthetic": "/testing/generate-synthetic-data"
     }
-    
-    # Add ML endpoints if available
-    if ML_ENDPOINTS_AVAILABLE:
-        endpoints.update({
-            "ml_status": "/ml/status",
-            "ml_train": "/ml/train", 
-            "ml_predict_eligibility": "/ml/predict/eligibility",
-            "ml_predict_risk": "/ml/predict/risk",
-            "ml_predict_support": "/ml/predict/support-amount",
-            "ml_detect_fraud": "/ml/predict/fraud",
-            "ml_match_programs": "/ml/predict/programs",
-            "ml_comprehensive": "/ml/predict/comprehensive",
-            "ml_models": "/ml/models",
-            "ml_evaluate": "/ml/evaluate"
-        })
     
     return {
         "message": "Social Support AI Workflow API with LangGraph",
         "version": "2.0.0",
         "status": "running",
-        "ml_models_available": ML_ENDPOINTS_AVAILABLE,
-        "workflow_engine": "LangGraph",
+        "workflow_engine": "LangGraph Conversation Workflow",
         "endpoints": endpoints,
         "features": [
-            "LangGraph-powered conversation workflow",
-            "Interactive chat-based application processing",
-            "Document processing and data extraction",
-            "Real-time eligibility assessment with ML models",
-            "LLM-generated economic enablement recommendations",
-            "Scikit-learn ML classification models",
-            "Fraud detection and risk assessment",
-            "State-based conversation management"
-        ],
-        "deprecated_endpoints": [
-            "/applications/{application_id}/process - Use /conversation/message instead",
-            "/applications/process-with-data - Use /conversation/message instead"
+            "🔄 LangGraph-powered conversation workflow",
+            "💬 Interactive chat-based application processing",
+            "📄 Multimodal document processing and data extraction",
+            "🎯 Real-time eligibility assessment with ML models",
+            "💡 LLM-generated economic enablement recommendations",
+            "🧠 Scikit-learn ML classification models",
+            "📈 State-based conversation management"
         ]
     }
 
@@ -665,6 +628,11 @@ def convert_frontend_state_to_langgraph(conversation_state: Dict, conversation_h
     else:
         logger.info(f"🎯 State conversion: Using provided current_step: '{current_step}'")
     
+    # CRITICAL DEBUG: Log uploaded documents state
+    uploaded_docs = conversation_state.get("uploaded_documents", [])
+    logger.info(f"🔍 DEBUG: Frontend uploaded_documents: {uploaded_docs}")
+    logger.info(f"🔍 DEBUG: Frontend conversation_state keys: {list(conversation_state.keys())}")
+    
     # Create LangGraph state
     langgraph_state = {
         "messages": messages,
@@ -672,7 +640,7 @@ def convert_frontend_state_to_langgraph(conversation_state: Dict, conversation_h
         "current_step": current_step,
         "eligibility_result": conversation_state.get("eligibility_result"),
         "final_decision": conversation_state.get("final_decision"),
-        "uploaded_documents": conversation_state.get("uploaded_documents", []),
+        "uploaded_documents": uploaded_docs,
         "workflow_history": conversation_state.get("workflow_history", []),
         "application_id": conversation_state.get("application_id"),
         "processing_status": processing_status or "in_progress",
@@ -682,6 +650,7 @@ def convert_frontend_state_to_langgraph(conversation_state: Dict, conversation_h
     }
     
     logger.info(f"🎯 State conversion complete: step='{current_step}', status='{processing_status}', has_eligibility={bool(conversation_state.get('eligibility_result'))}")
+    logger.info(f"🔍 DEBUG: LangGraph uploaded_documents: {langgraph_state['uploaded_documents']}")
     
     return langgraph_state
 

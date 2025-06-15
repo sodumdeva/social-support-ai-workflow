@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime
 import json
 import operator
+import re
 
 # Import agents with correct paths
 import sys
@@ -34,8 +35,9 @@ from src.models.database import (
 )
 
 # Import logging configuration
-from src.utils.logging_config import get_logger
+from src.utils.logging_config import get_logger, WorkflowLogger
 logger = get_logger("langgraph_workflow")
+demo_logger = WorkflowLogger("workflow")
 
 
 class ConversationState(TypedDict):
@@ -166,7 +168,12 @@ async def initialize_conversation(state: ConversationState) -> ConversationState
     state["error_messages"] = state.get("error_messages", [])
     
     # Set processing status based on whether we have user input
-    if state.get("user_input"):
+    # CRITICAL FIX: Don't override important processing statuses
+    current_status = state.get("processing_status", "")
+    if current_status in ["documents_need_processing", "ready_for_validation", "validated", "completed", "restarting"]:
+        # Preserve important processing statuses
+        logger.info(f"Preserving processing status: {current_status}")
+    elif state.get("user_input"):
         state["processing_status"] = "in_progress"
     else:
         state["processing_status"] = "waiting_for_input"
@@ -189,9 +196,15 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
     try:
         user_input = state.get("user_input")
         if not user_input:
-            logger.warning("No user input provided, setting status to waiting")
-            state["processing_status"] = "waiting_for_input"
-            return state
+            # CRITICAL FIX: Don't override important processing statuses when there's no user input
+            current_status = state.get("processing_status", "")
+            if current_status in ["validated", "eligibility_assessed", "documents_need_processing", "ready_for_validation"]:
+                logger.info(f"No user input, but preserving important processing status: {current_status}")
+                return state  # Return without changing status
+            else:
+                logger.warning("No user input provided, setting status to waiting")
+                state["processing_status"] = "waiting_for_input"
+                return state
         
         logger.info(f"Processing user message: '{user_input}' at step: {state['current_step']}")
         
@@ -258,8 +271,28 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
         elif state["current_step"] == ConversationStep.COMPLETION:
             state["processing_status"] = "completion_chat"
         elif state["current_step"] == ConversationStep.DOCUMENT_COLLECTION:
-            # Check if we need more information or documents
-            if has_minimum_required_data(state["collected_data"]):
+            # CRITICAL FIX: Check for unprocessed documents first
+            uploaded_docs = len(state.get("uploaded_documents", []))
+            processed_docs = len(state.get("processed_documents", []))
+            
+            if uploaded_docs > processed_docs:
+                # We have unprocessed documents - trigger document processing
+                state["processing_status"] = "documents_need_processing"
+                logger.info(f"Found {uploaded_docs - processed_docs} unprocessed documents, will trigger processing")
+            elif has_minimum_required_data(state["collected_data"]):
+                state["processing_status"] = "ready_for_validation"
+            else:
+                state["processing_status"] = "waiting_for_input"
+        elif state["current_step"] == ConversationStep.ELIGIBILITY_PROCESSING:
+            # CRITICAL FIX: Handle eligibility processing step
+            uploaded_docs = len(state.get("uploaded_documents", []))
+            processed_docs = len(state.get("processed_documents", []))
+            
+            if uploaded_docs > processed_docs:
+                # Process documents first before eligibility assessment
+                state["processing_status"] = "documents_need_processing"
+                logger.info(f"ELIGIBILITY_PROCESSING: Found {uploaded_docs - processed_docs} unprocessed documents, processing first")
+            elif has_minimum_required_data(state["collected_data"]):
                 state["processing_status"] = "ready_for_validation"
             else:
                 state["processing_status"] = "waiting_for_input"
@@ -299,66 +332,194 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
 
 
 async def process_documents(state: ConversationState) -> ConversationState:
-    """Process uploaded documents"""
+    """Process uploaded documents with detailed logging and data verification"""
     
     try:
-        logger.info("Processing uploaded documents")
+        demo_logger.log_step("DOCUMENT_PROCESSING", "🚀 Starting document processing workflow")
+        logger.info("🔍 Starting document processing with detailed extraction logging")
         
         # Get unprocessed documents
         processed_docs = state.get("processed_documents", [])
         uploaded_docs = state.get("uploaded_documents", [])
         unprocessed_docs = [doc for doc in uploaded_docs if doc not in processed_docs]
         
+        demo_logger.log_step("DOCUMENT_ANALYSIS", f"📊 Found {len(uploaded_docs)} uploaded, {len(processed_docs)} processed, {len(unprocessed_docs)} pending")
+        logger.info(f"📄 Document status: {len(uploaded_docs)} uploaded, {len(processed_docs)} processed, {len(unprocessed_docs)} pending")
+        
         if not unprocessed_docs:
+            demo_logger.log_step("DOCUMENT_PROCESSING", "ℹ️ No new documents to process")
+            logger.info("ℹ️  No new documents to process")
             state["processing_status"] = "no_documents_to_process"
             return state
         
         # Initialize data extraction agent
         data_extraction_agent = DataExtractionAgent()
         all_extraction_results = {}
+        user_provided_data = state.get("collected_data", {})
+        
+        demo_logger.log_step("USER_DATA", f"👤 User provided: {', '.join(user_provided_data.keys())}")
+        logger.info(f"👤 User-provided data for verification: {json.dumps(user_provided_data, indent=2)}")
         
         for doc_path in unprocessed_docs:
             try:
+                filename = os.path.basename(doc_path)
+                demo_logger.log_document_processing("UNKNOWN", filename, "STARTING")
+                logger.info(f"🔍 Processing document: {doc_path}")
+                
                 # Determine document type from filename
                 doc_type = determine_document_type(doc_path)
+                demo_logger.log_document_processing(doc_type.upper(), filename, "TYPE_DETECTED")
+                logger.info(f"📋 Detected document type: {doc_type}")
                 
                 # Process document
+                demo_logger.log_step("MULTIMODAL_AI", f"🤖 Sending {doc_type} to LLaVA for analysis...")
                 extraction_result = await data_extraction_agent.process({
                     "documents": [{"file_path": doc_path, "document_type": doc_type}],
                     "extraction_mode": "conversational"
                 })
                 
+                demo_logger.log_step("EXTRACTION_RESULT", f"📊 LLaVA processing completed: {extraction_result.get('status')}")
+                logger.info(f"📊 Extraction result status: {extraction_result.get('status')}")
+                
                 if extraction_result.get("status") == "success":
                     extracted_data = extraction_result.get("extraction_results", {}).get(doc_type, {})
+                    demo_logger.log_step("DATA_EXTRACTION", f"✅ Successfully extracted data from {doc_type}")
+                    logger.info(f"📄 Raw extraction data for {doc_type}: {json.dumps(extracted_data, indent=2)}")
+                    
+                    # IMPROVED: Handle multiple status checking scenarios
+                    extraction_successful = False
+                    structured_data = None
+                    confidence = 0.0
+                    processing_time = 0
+                    
+                    # Check for success in multiple ways
                     if extracted_data.get("status") == "success":
+                        extraction_successful = True
                         structured_data = extracted_data.get("structured_data", {})
-                        all_extraction_results[doc_type] = structured_data
+                        confidence = extracted_data.get("extraction_confidence", 0.0)
+                        processing_time = extracted_data.get("processing_time_ms", 0)
+                    elif "structured_data" in extracted_data:
+                        extraction_successful = True
+                        structured_data = extracted_data.get("structured_data", {})
+                        confidence = extracted_data.get("extraction_confidence", 0.0)
+                        processing_time = extracted_data.get("processing_time_ms", 0)
+                    elif extracted_data:  # Any data extracted
+                        extraction_successful = True
+                        structured_data = extracted_data
+                        confidence = extracted_data.get("extraction_confidence", 0.0)
+                        processing_time = extracted_data.get("processing_time_ms", 0)
+                    
+                    if extraction_successful and structured_data:
+                        demo_logger.log_step("EXTRACTION_SUCCESS", f"📋 Extracted {len(structured_data)} data fields (Confidence: {confidence:.2f}, Time: {processing_time:.0f}ms)")
+                        logger.info(f"✅ Successfully extracted structured data from {doc_type}")
+                        logger.info(f"📋 Structured data: {json.dumps(structured_data, indent=2)}")
                         
-                        # Update collected data with extracted information
-                        state["collected_data"].update(structured_data)
+                        # SIMPLIFIED: Perform only name verification for bank statements
+                        demo_logger.log_step("DATA_VERIFICATION", f"🔍 Starting simplified name verification for {doc_type}...")
+                        verification_results = verify_name_only(structured_data, user_provided_data, doc_type)
+                        
+                        # Log verification results
+                        summary = verification_results.get("_verification_summary", {})
+                        matches = summary.get("matches", 0)
+                        mismatches = summary.get("mismatches", 0)
+                        overall_score = summary.get("overall_score", 0)
+                        quality = summary.get("verification_quality", "Unknown")
+                        
+                        demo_logger.log_data_verification(doc_type.upper(), matches, mismatches, overall_score)
+                        demo_logger.log_step("VERIFICATION_QUALITY", f"🎯 Data quality: {quality} ({overall_score:.2f} score)")
+                        
+                        logger.info(f"🔍 Name verification results for {doc_type}:")
+                        for field, result in verification_results.items():
+                            if isinstance(result, dict) and "status" in result:
+                                if result["status"] == "match":
+                                    logger.info(f"  ✅ {field}: MATCH - User: '{result.get('user_value')}' | Document: '{result.get('extracted_value')}'")
+                                elif result["status"] == "mismatch":
+                                    logger.warning(f"  ❌ {field}: MISMATCH - User: '{result.get('user_value')}' | Document: '{result.get('extracted_value')}'")
+                                elif result["status"] == "missing_user":
+                                    logger.info(f"  ➕ {field}: NEW DATA from document - '{result.get('extracted_value')}'")
+                                elif result["status"] == "missing_document":
+                                    logger.info(f"  ⚠️  {field}: User provided '{result.get('user_value')}' but not found in document")
+                        
+                        all_extraction_results[doc_type] = {
+                            "structured_data": structured_data,
+                            "verification_results": verification_results,
+                            "extraction_confidence": confidence
+                        }
+                        
+                        demo_logger.log_step("DATA_MERGE", f"🔄 Name verification completed for {doc_type}")
+                        logger.info(f"🔄 Name verification completed for {doc_type}")
+                    
+                    else:
+                        error_msg = extracted_data.get("error", "No structured data found")
+                        demo_logger.log_document_processing(doc_type.upper(), filename, f"FAILED: {error_msg}")
+                        logger.error(f"❌ Document extraction failed for {doc_type}: {error_msg}")
+                
+                else:
+                    demo_logger.log_document_processing("UNKNOWN", filename, f"FAILED: {extraction_result.get('error', 'Unknown error')}")
+                    logger.error(f"❌ Document processing failed for {doc_path}: {extraction_result.get('error', 'Unknown error')}")
                 
             except Exception as e:
-                logger.error(f"Error processing document {doc_path}: {str(e)}")
+                demo_logger.log_document_processing("UNKNOWN", filename, f"ERROR: {str(e)}")
+                logger.error(f"❌ Error processing document {doc_path}: {str(e)}")
+                # Continue processing other documents even if one fails
+                continue
         
-        # Update processed documents list
+        # Update processed documents list - ONLY add documents that were successfully processed
         if "processed_documents" not in state:
             state["processed_documents"] = []
-        state["processed_documents"].extend(unprocessed_docs)
+        
+        # Only add documents that were actually processed successfully
+        successfully_processed = []
+        for doc_path in unprocessed_docs:
+            filename = os.path.basename(doc_path)
+            doc_type = determine_document_type(doc_path)
+            if doc_type in all_extraction_results:
+                successfully_processed.append(doc_path)
+                logger.info(f"✅ Marking {filename} as successfully processed")
+            else:
+                logger.warning(f"⚠️ {filename} was not successfully processed, will retry later")
+        
+        state["processed_documents"].extend(successfully_processed)
+        logger.info(f"📊 Updated processed_documents: {len(state['processed_documents'])} total, {len(successfully_processed)} newly processed")
         
         # Generate response about document processing
         if all_extraction_results:
             doc_types = list(all_extraction_results.keys())
-            response_msg = f"I've successfully processed your {', '.join(doc_types).replace('_', ' ')}. The extracted information has been added to your application."
+            demo_logger.log_step("PROCESSING_COMPLETE", f"✅ Successfully processed {len(all_extraction_results)} documents: {', '.join(doc_types)}")
+            
+            # SIMPLIFIED: Create simple response about name verification
+            response_parts = [f"I've processed your {', '.join(doc_types).replace('_', ' ')}. Here's what I found:"]
+            
+            for doc_type, results in all_extraction_results.items():
+                verification = results.get("verification_results", {})
+                name_result = verification.get("name", {})
+                
+                if name_result.get("status") == "match":
+                    response_parts.append(f"✅ {doc_type.replace('_', ' ').title()}: Name confirmed")
+                elif name_result.get("status") == "mismatch":
+                    response_parts.append(f"⚠️ {doc_type.replace('_', ' ').title()}: Name differs from document - using your provided name")
+                elif name_result.get("status") == "missing_user":
+                    extracted_name = name_result.get("extracted_value", "")
+                    response_parts.append(f"➕ {doc_type.replace('_', ' ').title()}: Found name '{extracted_name}' in document")
+                elif name_result.get("status") == "missing_document":
+                    response_parts.append(f"ℹ️ {doc_type.replace('_', ' ').title()}: Using your provided name (not found in document)")
+                else:
+                    response_parts.append(f"ℹ️ {doc_type.replace('_', ' ').title()}: Document processed successfully")
+            
+            response_msg = "\n".join(response_parts)
             
             state["messages"].append({
                 "role": "assistant",
                 "content": response_msg,
                 "timestamp": datetime.now().isoformat()
             })
+            
+            demo_logger.log_step("USER_RESPONSE", f"📝 Generated simplified response for user")
+            logger.info(f"📝 Generated response about document processing: {response_msg}")
         
-        state["processing_status"] = "documents_processed"
+        state["processing_status"] = "ready_for_validation"
         
-        # Log document processing
+        # Log document processing summary
         state["workflow_history"].append({
             "step": "process_documents",
             "documents_processed": len(all_extraction_results),
@@ -367,15 +528,728 @@ async def process_documents(state: ConversationState) -> ConversationState:
             "status": "completed"
         })
         
-        logger.info(f"Document processing completed. Processed {len(all_extraction_results)} documents")
+        demo_logger.log_step("DOCUMENT_PROCESSING", f"🏁 Document processing completed successfully")
+        logger.info(f"✅ Document processing completed. Successfully processed {len(all_extraction_results)} documents")
         
     except Exception as e:
         error_msg = f"Error processing documents: {str(e)}"
-        logger.error(error_msg)
+        demo_logger.log_step("DOCUMENT_PROCESSING", f"❌ FAILED: {error_msg}", "ERROR")
+        logger.error(f"❌ {error_msg}")
         state["error_messages"].append(error_msg)
         state["processing_status"] = "document_error"
     
     return state
+
+
+def verify_name_only(extracted_data: Dict, user_data: Dict, doc_type: str) -> Dict:
+    """Simplified verification focusing only on name matching"""
+    
+    verification_results = {}
+    user_name = user_data.get("name", "")
+    
+    logger.info(f"🔍 Starting simplified name verification for {doc_type}")
+    logger.info(f"👤 User name: '{user_name}'")
+    
+    # Try to find name in different ways based on document type
+    extracted_name = None
+    
+    if doc_type == "bank_statement":
+        # For bank statements, try multiple approaches
+        # 1. Check structured data for account holder name
+        if isinstance(extracted_data, dict):
+            # Try nested structure first
+            account_info = extracted_data.get("account_info", {})
+            if account_info and isinstance(account_info, dict):
+                extracted_name = account_info.get("account_holder_name")
+            
+            # If not found, check raw text for fallback parsing
+            if not extracted_name and extracted_data.get("parsing_method") == "text_fallback":
+                raw_text = extracted_data.get("raw_text", "")
+                if user_name and raw_text and user_name.upper() in raw_text.upper():
+                    extracted_name = f"Found in raw text: {user_name}"
+                    logger.info(f"🔍 FALLBACK: Found name '{user_name}' in raw text")
+    
+    elif doc_type == "emirates_id":
+        # For Emirates ID
+        personal_info = extracted_data.get("personal_info", {})
+        if personal_info:
+            extracted_name = personal_info.get("full_name")
+    
+    elif doc_type == "resume":
+        # For resume
+        personal_contact = extracted_data.get("personal_contact", {})
+        if personal_contact:
+            extracted_name = personal_contact.get("full_name")
+    
+    elif doc_type == "salary_certificate":
+        # For salary certificate
+        employee_info = extracted_data.get("employee_info", {})
+        if employee_info:
+            extracted_name = employee_info.get("employee_name")
+    
+    # Perform name comparison
+    if extracted_name and user_name:
+        # Both values exist - perform comparison
+        match_result = compare_names(extracted_name.lower().strip(), user_name.lower().strip())
+        verification_results["name"] = {
+            "status": match_result["status"],
+            "user_value": user_name,
+            "extracted_value": extracted_name,
+            "confidence": match_result["confidence"],
+            "match_score": match_result.get("match_score", 0.0),
+            "comparison_notes": match_result.get("notes", "")
+        }
+        
+        if match_result["status"] == "match":
+            logger.info(f"  ✅ NAME MATCH: '{user_name}' ≈ '{extracted_name}'")
+        else:
+            logger.warning(f"  ❌ NAME MISMATCH: '{user_name}' ≠ '{extracted_name}'")
+            
+    elif extracted_name and not user_name:
+        # Found name in document but user didn't provide one
+        verification_results["name"] = {
+            "status": "missing_user",
+            "extracted_value": extracted_name,
+            "confidence": "medium",
+            "notes": "Found name in document but user didn't provide one"
+        }
+        logger.info(f"  ➕ NEW NAME: Found '{extracted_name}' in document")
+        
+    elif user_name and not extracted_name:
+        # User provided name but not found in document
+        verification_results["name"] = {
+            "status": "missing_document",
+            "user_value": user_name,
+            "confidence": "low",
+            "notes": "User provided name but not found in document"
+        }
+        logger.warning(f"  ⚠️  MISSING: User name '{user_name}' not found in document")
+    
+    else:
+        # Neither found
+        verification_results["name"] = {
+            "status": "missing_both",
+            "confidence": "low",
+            "notes": "No name found in either user data or document"
+        }
+        logger.warning(f"  ⚠️  NO NAMES: Neither user nor document has name information")
+    
+    # Calculate simple verification score
+    if verification_results.get("name", {}).get("status") == "match":
+        overall_score = verification_results["name"].get("match_score", 1.0)
+        matches = 1
+        mismatches = 0
+        quality = "High" if overall_score > 0.8 else "Medium" if overall_score > 0.5 else "Low"
+    elif verification_results.get("name", {}).get("status") in ["missing_user", "missing_document"]:
+        overall_score = 0.5
+        matches = 0
+        mismatches = 0
+        quality = "Partial"
+    else:
+        overall_score = 0.0
+        matches = 0
+        mismatches = 1
+        quality = "Low"
+    
+    verification_results["_verification_summary"] = {
+        "overall_score": overall_score,
+        "total_fields_checked": 1,
+        "matches": matches,
+        "mismatches": mismatches,
+        "new_data_found": 1 if verification_results.get("name", {}).get("status") == "missing_user" else 0,
+        "verification_quality": quality
+    }
+    
+    logger.info(f"📊 Simplified Name Verification Summary for {doc_type}:")
+    logger.info(f"   Overall Score: {overall_score:.2f}")
+    logger.info(f"   Quality: {quality}")
+    
+    return verification_results
+
+
+def verify_extracted_data_against_user_input(extracted_data: Dict, user_data: Dict, doc_type: str) -> Dict:
+    """Enhanced verification of extracted document data against user-provided information"""
+    
+    verification_results = {}
+    
+    logger.info(f"🔍 Starting detailed verification for {doc_type}")
+    logger.info(f"📄 Document data keys: {list(extracted_data.keys())}")
+    logger.info(f"👤 User data keys: {list(user_data.keys())}")
+    
+    # Define comprehensive field mappings for different document types
+    field_mappings = {
+        "emirates_id": {
+            # Map document fields to user data fields
+            "personal_info.full_name": "name",
+            "personal_info.emirates_id_number": "emirates_id",
+            "personal_info.nationality": "nationality",
+            "personal_info.date_of_birth": "date_of_birth",
+            "personal_info.gender": "gender"
+        },
+        "bank_statement": {
+            "account_info.account_holder_name": "name",
+            # Temporarily focusing only on name verification
+            # "income_verification.monthly_salary": "monthly_income",
+            # "income_verification.total_monthly_income": "monthly_income",
+            # "income_verification.employer_name": "employer_name",
+            # "financial_data.closing_balance": "savings_amount"
+        },
+        "resume": {
+            "personal_contact.full_name": "name",
+            "personal_contact.email_address": "email",
+            "personal_contact.phone_number": "phone_number",
+            "current_employment.current_employer": "employer_name",
+            "current_employment.current_position": "job_title",
+            "current_employment.employment_status": "employment_status",
+            "professional_summary.total_experience_months": "work_experience_months"
+        },
+        "salary_certificate": {
+            "employee_info.employee_name": "name",
+            "employee_info.position": "job_title",
+            "employer_info.company_name": "employer_name",
+            "salary_details.gross_salary": "monthly_income",
+            "salary_details.basic_salary": "monthly_income",
+            "employment_details.employment_type": "employment_status"
+        }
+    }
+    
+    mappings = field_mappings.get(doc_type, {})
+    
+    # Perform field-by-field verification
+    for doc_field, user_field in mappings.items():
+        extracted_value = get_nested_value(extracted_data, doc_field)
+        user_value = user_data.get(user_field)
+        
+        logger.info(f"🔍 Verifying {user_field}: Document='{extracted_value}' vs User='{user_value}'")
+        
+        if extracted_value is not None and user_value is not None:
+            # Both values exist - perform detailed comparison
+            match_result = compare_values(extracted_value, user_value, user_field)
+            verification_results[user_field] = {
+                "status": match_result["status"],
+                "user_value": user_value,
+                "extracted_value": extracted_value,
+                "confidence": match_result["confidence"],
+                "match_score": match_result.get("match_score", 0.0),
+                "comparison_notes": match_result.get("notes", "")
+            }
+            
+            if match_result["status"] == "match":
+                logger.info(f"  ✅ MATCH: {user_field}")
+            elif match_result["status"] == "mismatch":
+                logger.warning(f"  ❌ MISMATCH: {user_field} - {match_result.get('notes', '')}")
+            else:
+                logger.info(f"  ⚠️  PARTIAL: {user_field} - {match_result.get('notes', '')}")
+                
+        elif extracted_value is not None and user_value is None:
+            # New data from document
+            verification_results[user_field] = {
+                "status": "missing_user",
+                "extracted_value": extracted_value,
+                "confidence": "medium",
+                "notes": "Found in document but not provided by user"
+            }
+            logger.info(f"  ➕ NEW DATA: {user_field} = '{extracted_value}'")
+            
+        elif extracted_value is None and user_value is not None:
+            # User provided data not found in document
+            verification_results[user_field] = {
+                "status": "missing_document",
+                "user_value": user_value,
+                "confidence": "low",
+                "notes": "User provided but not found in document"
+            }
+            logger.warning(f"  ⚠️  MISSING: {user_field} = '{user_value}' not found in document")
+    
+    # SPECIAL HANDLING: For fallback parsing cases, check if name appears in raw_text
+    if extracted_data.get("parsing_method") == "text_fallback" and doc_type == "bank_statement":
+        raw_text = extracted_data.get("raw_text", "")
+        user_name = user_data.get("name", "")
+        
+        if user_name and raw_text and user_name.upper() in raw_text.upper():
+            logger.info(f"🔍 FALLBACK: Found name '{user_name}' in raw text for fallback parsing")
+            verification_results["name"] = {
+                "status": "match",
+                "user_value": user_name,
+                "extracted_value": f"Found in raw text: {user_name}",
+                "confidence": "medium",
+                "match_score": 0.8,
+                "comparison_notes": "Name found in fallback parsing raw text"
+            }
+            logger.info(f"  ✅ FALLBACK MATCH: name")
+    
+    # Perform document-specific additional verifications
+    additional_checks = perform_document_specific_checks(extracted_data, user_data, doc_type)
+    if additional_checks:
+        verification_results.update(additional_checks)
+    
+    # Calculate overall verification score
+    overall_score = calculate_verification_score(verification_results)
+    verification_results["_verification_summary"] = {
+        "overall_score": overall_score,
+        "total_fields_checked": len([r for r in verification_results.values() if isinstance(r, dict) and "status" in r]),
+        "matches": len([r for r in verification_results.values() if isinstance(r, dict) and r.get("status") == "match"]),
+        "mismatches": len([r for r in verification_results.values() if isinstance(r, dict) and r.get("status") == "mismatch"]),
+        "new_data_found": len([r for r in verification_results.values() if isinstance(r, dict) and r.get("status") == "missing_user"]),
+        "verification_quality": "High" if overall_score > 0.8 else "Medium" if overall_score > 0.5 else "Low"
+    }
+    
+    logger.info(f"📊 Verification Summary for {doc_type}:")
+    logger.info(f"   Overall Score: {overall_score:.2f}")
+    logger.info(f"   Matches: {verification_results['_verification_summary']['matches']}")
+    logger.info(f"   Mismatches: {verification_results['_verification_summary']['mismatches']}")
+    logger.info(f"   New Data: {verification_results['_verification_summary']['new_data_found']}")
+    
+    return verification_results
+
+
+def compare_values(extracted_value: Any, user_value: Any, field_name: str) -> Dict:
+    """Enhanced value comparison with field-specific logic"""
+    
+    # Handle None or empty values
+    if not extracted_value or not user_value:
+        return {"status": "partial", "confidence": "low", "notes": "One or both values are empty"}
+    
+    # Convert to strings for comparison
+    extracted_str = str(extracted_value).strip().lower()
+    user_str = str(user_value).strip().lower()
+    
+    # Field-specific comparison logic
+    if field_name in ["monthly_income", "salary", "gross_salary", "basic_salary"]:
+        return compare_financial_values(extracted_value, user_value)
+    elif field_name in ["name", "full_name", "employee_name"]:
+        return compare_names(extracted_str, user_str)
+    elif field_name in ["emirates_id", "emirates_id_number"]:
+        return compare_id_numbers(extracted_str, user_str)
+    elif field_name in ["employer_name", "company_name"]:
+        return compare_company_names(extracted_str, user_str)
+    elif field_name in ["employment_status"]:
+        return compare_employment_status(extracted_str, user_str)
+    else:
+        # Generic string comparison
+        return compare_generic_strings(extracted_str, user_str)
+
+
+def compare_financial_values(extracted_value: Any, user_value: Any) -> Dict:
+    """Compare financial values with intelligent tolerance for salary ranges"""
+    
+    try:
+        # Extract numeric values
+        extracted_num = extract_numeric_value(str(extracted_value))
+        user_num = extract_numeric_value(str(user_value))
+        
+        if extracted_num is None or user_num is None:
+            return {"status": "partial", "confidence": "low", "notes": "Could not extract numeric values"}
+        
+        # Calculate percentage difference
+        diff_percent = abs(extracted_num - user_num) / max(extracted_num, user_num) * 100
+        
+        # Enhanced tolerance for salary ranges
+        if diff_percent <= 3:  # Within 3% - exact match
+            return {
+                "status": "match",
+                "confidence": "high",
+                "match_score": 1.0,
+                "notes": f"Values match within {diff_percent:.1f}% tolerance"
+            }
+        elif diff_percent <= 10:  # Within 10% - very good match
+            return {
+                "status": "match",
+                "confidence": "high",
+                "match_score": 0.95,
+                "notes": f"Values match within acceptable range ({diff_percent:.1f}% difference)"
+            }
+        elif diff_percent <= 20:  # Within 20% - acceptable for salary variations
+            return {
+                "status": "partial",
+                "confidence": "medium",
+                "match_score": 0.8,
+                "notes": f"Values within salary range ({diff_percent:.1f}% difference) - possible bonus/allowance variation"
+            }
+        elif diff_percent <= 35:  # Within 35% - possible different salary components
+            return {
+                "status": "partial",
+                "confidence": "medium",
+                "match_score": 0.6,
+                "notes": f"Values differ by {diff_percent:.1f}% - possible basic vs gross salary difference"
+            }
+        else:
+            return {
+                "status": "mismatch",
+                "confidence": "high",
+                "match_score": 0.0,
+                "notes": f"Significant difference: {diff_percent:.1f}%"
+            }
+            
+    except Exception as e:
+        return {"status": "partial", "confidence": "low", "notes": f"Comparison error: {str(e)}"}
+
+
+def compare_names(extracted_name: str, user_name: str) -> Dict:
+    """Compare names with intelligent tolerance for variations and cultural naming patterns"""
+    
+    # Normalize names
+    extracted_clean = normalize_name(extracted_name)
+    user_clean = normalize_name(user_name)
+    
+    # Exact match
+    if extracted_clean == user_clean:
+        return {"status": "match", "confidence": "high", "match_score": 1.0}
+    
+    # Split into parts for analysis
+    extracted_parts = [part for part in extracted_clean.split() if len(part) > 1]  # Ignore single letters
+    user_parts = [part for part in user_clean.split() if len(part) > 1]
+    
+    # Check for exact substring matches (handles middle name variations)
+    if extracted_clean in user_clean or user_clean in extracted_clean:
+        return {
+            "status": "match",
+            "confidence": "high",
+            "match_score": 0.95,
+            "notes": "Name is a subset of the other - likely middle name variation"
+        }
+    
+    # Calculate matching parts
+    common_parts = []
+    for ext_part in extracted_parts:
+        for user_part in user_parts:
+            # Exact match
+            if ext_part == user_part:
+                common_parts.append(ext_part)
+            # Partial match for longer names (handles abbreviations)
+            elif len(ext_part) >= 4 and len(user_part) >= 4:
+                if ext_part.startswith(user_part[:3]) or user_part.startswith(ext_part[:3]):
+                    common_parts.append(ext_part)
+    
+    # Remove duplicates
+    common_parts = list(set(common_parts))
+    total_unique_parts = len(set(extracted_parts + user_parts))
+    
+    # Enhanced matching logic for Arabic/Middle Eastern names
+    if len(common_parts) >= 2:  # At least 2 parts match
+        match_ratio = len(common_parts) / max(len(extracted_parts), len(user_parts))
+        
+        if match_ratio >= 0.8:  # 80% of parts match
+            return {
+                "status": "match",
+                "confidence": "high",
+                "match_score": 0.9,
+                "notes": f"Strong name match: {len(common_parts)} common parts ({match_ratio:.1%} similarity)"
+            }
+        elif match_ratio >= 0.6:  # 60% of parts match
+            return {
+                "status": "match",
+                "confidence": "medium",
+                "match_score": 0.85,
+                "notes": f"Good name match: {len(common_parts)} common parts ({match_ratio:.1%} similarity)"
+            }
+        else:
+            return {
+                "status": "partial",
+                "confidence": "medium",
+                "match_score": 0.7,
+                "notes": f"Partial name match: {len(common_parts)} common parts"
+            }
+    
+    # Check for single strong match (first name or last name)
+    elif len(common_parts) == 1:
+        # If it's a longer name part (likely significant)
+        if len(common_parts[0]) >= 4:
+            return {
+                "status": "partial",
+                "confidence": "medium",
+                "match_score": 0.6,
+                "notes": f"Single significant name part matches: '{common_parts[0]}'"
+            }
+        else:
+            return {
+                "status": "partial",
+                "confidence": "low",
+                "match_score": 0.4,
+                "notes": f"Only short name part matches: '{common_parts[0]}'"
+            }
+    
+    # Check for initials match (common in documents)
+    extracted_initials = ''.join([part[0] for part in extracted_parts if part])
+    user_initials = ''.join([part[0] for part in user_parts if part])
+    
+    if len(extracted_initials) >= 2 and extracted_initials == user_initials:
+        return {
+            "status": "partial",
+            "confidence": "medium",
+            "match_score": 0.5,
+            "notes": f"Name initials match: {extracted_initials}"
+        }
+    
+    # Use fuzzy string matching as fallback
+    from difflib import SequenceMatcher
+    similarity = SequenceMatcher(None, extracted_clean, user_clean).ratio()
+    
+    if similarity >= 0.7:
+        return {
+            "status": "partial",
+            "confidence": "low",
+            "match_score": similarity,
+            "notes": f"Names have {similarity:.1%} character similarity"
+        }
+    
+    return {
+        "status": "mismatch",
+        "confidence": "high",
+        "match_score": 0.0,
+        "notes": "Names do not match sufficiently"
+    }
+
+
+def compare_id_numbers(extracted_id: str, user_id: str) -> Dict:
+    """Compare ID numbers with exact matching"""
+    
+    # Remove formatting characters
+    extracted_clean = re.sub(r'[^0-9]', '', extracted_id)
+    user_clean = re.sub(r'[^0-9]', '', user_id)
+    
+    if extracted_clean == user_clean:
+        return {"status": "match", "confidence": "high", "match_score": 1.0}
+    
+    # Check for partial matches (useful for redacted IDs)
+    if len(extracted_clean) >= 10 and len(user_clean) >= 10:
+        # Compare first and last few digits
+        if extracted_clean[:4] == user_clean[:4] and extracted_clean[-4:] == user_clean[-4:]:
+            return {
+                "status": "partial",
+                "confidence": "medium",
+                "match_score": 0.7,
+                "notes": "Partial ID match - first and last digits match"
+            }
+    
+    return {"status": "mismatch", "confidence": "high", "match_score": 0.0}
+
+
+def compare_company_names(extracted_company: str, user_company: str) -> Dict:
+    """Compare company names with tolerance for variations"""
+    
+    # Normalize company names
+    extracted_norm = normalize_company_name(extracted_company)
+    user_norm = normalize_company_name(user_company)
+    
+    if extracted_norm == user_norm:
+        return {"status": "match", "confidence": "high", "match_score": 1.0}
+    
+    # Check for substring matches
+    if extracted_norm in user_norm or user_norm in extracted_norm:
+        return {
+            "status": "partial",
+            "confidence": "medium",
+            "match_score": 0.8,
+            "notes": "Company names partially match"
+        }
+    
+    # Check for common abbreviations
+    if check_company_abbreviations(extracted_norm, user_norm):
+        return {
+            "status": "partial",
+            "confidence": "medium",
+            "match_score": 0.7,
+            "notes": "Possible company name abbreviation match"
+        }
+    
+    return {"status": "mismatch", "confidence": "high", "match_score": 0.0}
+
+
+def compare_employment_status(extracted_status: str, user_status: str) -> Dict:
+    """Compare employment status with normalization"""
+    
+    status_mappings = {
+        "employed": ["employed", "working", "full-time", "part-time", "permanent", "contract"],
+        "unemployed": ["unemployed", "not working", "jobless", "seeking work"],
+        "self-employed": ["self-employed", "freelance", "consultant", "business owner", "entrepreneur"]
+    }
+    
+    def normalize_status(status):
+        status = status.lower().strip()
+        for normalized, variants in status_mappings.items():
+            if any(variant in status for variant in variants):
+                return normalized
+        return status
+    
+    extracted_norm = normalize_status(extracted_status)
+    user_norm = normalize_status(user_status)
+    
+    if extracted_norm == user_norm:
+        return {"status": "match", "confidence": "high", "match_score": 1.0}
+    
+    return {"status": "mismatch", "confidence": "high", "match_score": 0.0}
+
+
+def compare_generic_strings(extracted_str: str, user_str: str) -> Dict:
+    """Generic string comparison with fuzzy matching"""
+    
+    if extracted_str == user_str:
+        return {"status": "match", "confidence": "high", "match_score": 1.0}
+    
+    # Calculate similarity ratio
+    from difflib import SequenceMatcher
+    similarity = SequenceMatcher(None, extracted_str, user_str).ratio()
+    
+    if similarity >= 0.9:
+        return {"status": "match", "confidence": "high", "match_score": similarity}
+    elif similarity >= 0.7:
+        return {"status": "partial", "confidence": "medium", "match_score": similarity}
+    else:
+        return {"status": "mismatch", "confidence": "high", "match_score": similarity}
+
+
+def perform_document_specific_checks(extracted_data: Dict, user_data: Dict, doc_type: str) -> Dict:
+    """Perform additional document-specific verification checks"""
+    
+    additional_checks = {}
+    
+    if doc_type == "bank_statement":
+        # Check income consistency
+        income_verification = extracted_data.get("income_verification", {})
+        if income_verification.get("income_consistency") == "Irregular":
+            additional_checks["income_stability_concern"] = {
+                "status": "warning",
+                "confidence": "medium",
+                "notes": "Document indicates irregular income pattern"
+            }
+        
+        # Check for financial stress indicators
+        spending_patterns = extracted_data.get("spending_patterns", {})
+        stress_indicators = spending_patterns.get("financial_stress_indicators", [])
+        if stress_indicators:
+            additional_checks["financial_stress_detected"] = {
+                "status": "warning",
+                "confidence": "high",
+                "notes": f"Financial stress indicators found: {', '.join(stress_indicators)}"
+            }
+    
+    elif doc_type == "salary_certificate":
+        # Check document authenticity
+        doc_verification = extracted_data.get("document_verification", {})
+        if doc_verification.get("document_authenticity") == "Questionable":
+            additional_checks["document_authenticity_concern"] = {
+                "status": "warning",
+                "confidence": "high",
+                "notes": "Document authenticity appears questionable"
+            }
+    
+    elif doc_type == "resume":
+        # Check for employment gaps
+        professional_summary = extracted_data.get("professional_summary", {})
+        employment_gaps = professional_summary.get("employment_gaps", [])
+        if employment_gaps:
+            additional_checks["employment_gaps_detected"] = {
+                "status": "info",
+                "confidence": "medium",
+                "notes": f"Employment gaps detected: {', '.join(employment_gaps)}"
+            }
+    
+    return additional_checks
+
+
+# Helper functions
+def extract_numeric_value(value_str: str) -> Optional[float]:
+    """Extract numeric value from string, handling various formats"""
+    try:
+        # Remove common non-numeric characters
+        cleaned = re.sub(r'[^\d.,]', '', str(value_str))
+        # Handle comma as thousands separator
+        cleaned = cleaned.replace(',', '')
+        return float(cleaned)
+    except:
+        return None
+
+
+def normalize_name(name: str) -> str:
+    """Normalize name for comparison"""
+    return re.sub(r'[^a-z\s]', '', name.lower()).strip()
+
+
+def normalize_company_name(company: str) -> str:
+    """Normalize company name for comparison"""
+    # Remove common suffixes and prefixes
+    company = re.sub(r'\b(llc|ltd|inc|corp|company|co|group|holdings)\b', '', company.lower())
+    return re.sub(r'[^a-z\s]', '', company).strip()
+
+
+def check_company_abbreviations(name1: str, name2: str) -> bool:
+    """Check if company names might be abbreviations of each other"""
+    # Simple check for initials
+    words1 = name1.split()
+    words2 = name2.split()
+    
+    if len(words1) > 1 and len(words2) == 1:
+        initials = ''.join([word[0] for word in words1 if word])
+        return initials == words2[0]
+    elif len(words2) > 1 and len(words1) == 1:
+        initials = ''.join([word[0] for word in words2 if word])
+        return initials == words1[0]
+    
+    return False
+
+
+def calculate_verification_score(verification_results: Dict) -> float:
+    """Calculate overall verification score"""
+    
+    scores = []
+    for key, result in verification_results.items():
+        if isinstance(result, dict) and "match_score" in result:
+            scores.append(result["match_score"])
+        elif isinstance(result, dict) and result.get("status") == "match":
+            scores.append(1.0)
+        elif isinstance(result, dict) and result.get("status") == "partial":
+            scores.append(0.5)
+    
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def get_nested_value(data: Dict, path: str):
+    """Get value from nested dictionary using dot notation"""
+    keys = path.split('.')
+    current = data
+    
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return None
+    
+    return current
+
+
+def normalize_value(value) -> str:
+    """Normalize values for comparison"""
+    if value is None:
+        return ""
+    
+    # Convert to string and normalize
+    str_value = str(value).strip().lower()
+    
+    # Remove common formatting
+    str_value = str_value.replace("-", "").replace(" ", "").replace("_", "")
+    
+    return str_value
+
+
+def merge_extracted_data_with_user_data(user_data: Dict, extracted_data: Dict, verification_results: Dict) -> Dict:
+    """Merge extracted data with user data, prioritizing user input for conflicts"""
+    
+    merged_data = {}
+    
+    for field, result in verification_results.items():
+        if result["status"] == "missing_user":
+            # Add new data from document
+            merged_data[field] = result["extracted_value"]
+        elif result["status"] == "match":
+            # Keep user data (already matches)
+            continue
+        elif result["status"] == "mismatch":
+            # Keep user data but log the discrepancy
+            continue
+        # For missing_document, we already have user data
+    
+    return merged_data
 
 
 async def validate_information(state: ConversationState) -> ConversationState:
@@ -417,6 +1291,10 @@ async def validate_information(state: ConversationState) -> ConversationState:
         state["validation_results"] = validation_results
         state["processing_status"] = "validated"
         
+        # DEBUG: Log what we're setting in the state
+        logger.info(f"🔍 VALIDATION DEBUG: Setting validation_results = {validation_results}")
+        logger.info(f"🔍 VALIDATION DEBUG: Setting processing_status = 'validated'")
+        
         # Log validation
         state["workflow_history"].append({
             "step": "validate_information",
@@ -440,12 +1318,18 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
     """Assess eligibility for social support and store ML results"""
     
     try:
+        demo_logger.log_step("ELIGIBILITY_ASSESSMENT", "🚀 Starting eligibility assessment with ML models")
         logger.info("Starting eligibility assessment")
         
         # Initialize eligibility agent
         eligibility_agent = EligibilityAssessmentAgent()
         
+        # Log user data being assessed
+        collected_data = state["collected_data"]
+        demo_logger.log_step("ASSESSMENT_INPUT", f"📊 Assessing user: {collected_data.get('name', 'Unknown')} - Income: {collected_data.get('monthly_income', 0)} AED, Family: {collected_data.get('family_size', 1)}")
+        
         # Run eligibility assessment
+        demo_logger.log_step("ML_PROCESSING", "🤖 Running ML models for eligibility and support amount prediction...")
         eligibility_result = await eligibility_agent.process({
             "application_data": state["collected_data"],
             "assessment_mode": "conversational"
@@ -457,12 +1341,31 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
             if not decision:
                 decision = {k: v for k, v in eligibility_result.items() if k not in {"status", "agent_name", "application_id", "assessed_at", "assessment_method", "reasoning"}}
             
+            # Log ML predictions
+            ml_prediction = decision.get("ml_prediction", {})
+            if ml_prediction:
+                eligible = ml_prediction.get("eligible", False)
+                confidence = ml_prediction.get("confidence", 0.0)
+                support_amount = ml_prediction.get("support_amount", 0)
+                
+                demo_logger.log_eligibility_assessment(eligible, support_amount, confidence)
+                demo_logger.log_step("ML_FEATURES", f"🔢 Used features: {', '.join(ml_prediction.get('features_used', {}).keys())}")
+            
+            # Log overall decision
+            overall_eligible = decision.get("eligible", False)
+            overall_amount = decision.get("support_amount", 0)
+            reason = decision.get("reason", "Assessment completed")
+            
+            demo_logger.log_step("FINAL_DECISION", f"⚖️ Final Decision: {'APPROVED' if overall_eligible else 'DECLINED'} - {overall_amount} AED")
+            demo_logger.log_step("DECISION_REASON", f"📝 Reason: {reason}")
+            
             state["eligibility_result"] = decision
             state["processing_status"] = "eligibility_assessed"
             
             # CRITICAL: Store ML model predictions in database if we have an application_id
             if state.get("application_id") and decision.get("ml_prediction"):
                 try:
+                    demo_logger.log_database_operation("ML_STORAGE", "STARTING", "Storing ML predictions")
                     db = SessionLocal()
                     try:
                         ml_prediction = decision.get("ml_prediction", {})
@@ -487,6 +1390,7 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
                                 "eligibility_classifier",
                                 eligibility_prediction_data
                             )
+                            demo_logger.log_database_operation("ELIGIBILITY_ML", "STORED", f"Confidence: {ml_prediction.get('confidence', 0.5):.3f}")
                         
                         # Store support amount prediction
                         if "support_amount" in ml_prediction:
@@ -507,23 +1411,29 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
                                 "support_amount_regressor",
                                 support_prediction_data
                             )
+                            demo_logger.log_database_operation("SUPPORT_AMOUNT_ML", "STORED", f"Amount: {ml_prediction.get('support_amount', 0)} AED")
                         
                         db.commit()
+                        demo_logger.log_database_operation("ML_STORAGE", "SUCCESS", "All ML predictions stored")
                         logger.info("✅ ML predictions stored in database")
                         
                     except Exception as e:
+                        demo_logger.log_database_operation("ML_STORAGE", "FAILED", str(e))
                         logger.error(f"❌ Failed to store ML predictions: {str(e)}")
                         db.rollback()
                     finally:
                         db.close()
                         
                 except Exception as e:
+                    demo_logger.log_database_operation("ML_STORAGE", "ERROR", str(e))
                     logger.error(f"❌ Database connection failed for ML storage: {str(e)}")
             
+            demo_logger.log_step("ELIGIBILITY_ASSESSMENT", f"✅ Assessment completed successfully")
             logger.info(f"Eligibility assessment completed. Eligible: {decision.get('eligible', False)}")
             
         else:
             # Generate fallback decision
+            demo_logger.log_step("ELIGIBILITY_FALLBACK", "⚠️ ML assessment failed, using rule-based fallback")
             logger.warning("Eligibility assessment failed, using fallback decision")
             state["eligibility_result"] = generate_fallback_eligibility_decision(state["collected_data"])
             state["processing_status"] = "eligibility_fallback"
@@ -539,6 +1449,7 @@ async def assess_eligibility(state: ConversationState) -> ConversationState:
         
     except Exception as e:
         error_msg = f"Error in eligibility assessment: {str(e)}"
+        demo_logger.log_step("ELIGIBILITY_ASSESSMENT", f"❌ FAILED: {error_msg}", "ERROR")
         logger.error(error_msg)
         state["error_messages"].append(error_msg)
         state["processing_status"] = "eligibility_error"
@@ -899,6 +1810,22 @@ async def handle_completion_chat(state: ConversationState) -> ConversationState:
     """Handle post-completion conversation"""
     
     try:
+        # CRITICAL FIX: Don't process the user's last input if we just completed the application
+        # Check if this is the first time entering completion phase
+        workflow_history = state.get("workflow_history", [])
+        finalization_steps = [step for step in workflow_history if step.get("step") == "finalize_application"]
+        
+        if finalization_steps:
+            # We just completed finalization - the final response should already be in messages
+            # Don't process any user input as completion chat yet
+            last_message = state.get("messages", [])[-1] if state.get("messages") else None
+            if last_message and last_message.get("role") == "assistant":
+                # The finalization response is already there, just preserve it
+                state["last_agent_response"] = last_message.get("content", "")
+                state["processing_status"] = "completion_chat"
+                state["user_input"] = None  # Clear any user input
+                return state
+        
         # Get user input for completion chat
         user_input = state.get("user_input")
         if not user_input:
@@ -1025,16 +1952,47 @@ def determine_next_action(state: ConversationState) -> str:
     if current_step == ConversationStep.COMPLETION or processing_status == "completion_chat":
         return "completion_chat"
     
-    # Check if we have new documents to process
+    # CRITICAL FIX: Handle DOCUMENT_COLLECTION step properly
+    if current_step == ConversationStep.DOCUMENT_COLLECTION:
+        # If we're in document collection step, continue conversation to let user upload or proceed
+        user_input = state.get("user_input")
+        if user_input:
+            logger.info("🔍 ROUTING: In DOCUMENT_COLLECTION step with user input, continuing conversation")
+            return "continue_conversation"
+        else:
+            logger.info("🔍 ROUTING: In DOCUMENT_COLLECTION step without user input, waiting")
+            return "waiting"
+    
+    # CRITICAL FIX: Always check for unprocessed documents first, regardless of other conditions
     uploaded_docs = len(state.get("uploaded_documents", []))
     processed_docs = len(state.get("processed_documents", []))
-    if uploaded_docs > processed_docs:
-        return "process_documents"
     
-    # Handle validation flow
+    # ENHANCED DEBUG: Show detailed document state
+    logger.info(f"🔍 DOCUMENT DEBUG: uploaded_documents array: {state.get('uploaded_documents', [])}")
+    logger.info(f"🔍 DOCUMENT DEBUG: processed_documents array: {state.get('processed_documents', [])}")
+    logger.debug(f"Document status: {uploaded_docs} uploaded, {processed_docs} processed")
+    
+    # CRITICAL LOOP PREVENTION: Check workflow history to prevent infinite document processing
+    recent_steps = [entry.get("step", "") for entry in workflow_history[-5:]]
+    document_processing_count = recent_steps.count("process_documents")
+    validation_count = recent_steps.count("validate_information")
+    
+    if document_processing_count >= 2 and validation_count >= 1:
+        logger.warning(f"🚨 LOOP PREVENTION: Detected repeated document processing ({document_processing_count}x) and validation ({validation_count}x), forcing progression to eligibility assessment")
+        return "assess_eligibility"
+    
+    if uploaded_docs > processed_docs or processing_status == "documents_need_processing":
+        logger.info(f"🔍 DOCUMENT PROCESSING TRIGGERED: {uploaded_docs} uploaded > {processed_docs} processed OR status = {processing_status}")
+        logger.debug("Found unprocessed documents, routing to process_documents")
+        return "process_documents"
+    else:
+        logger.info(f"🔍 NO DOCUMENT PROCESSING: {uploaded_docs} uploaded = {processed_docs} processed AND status != documents_need_processing")
+    
+    # Handle validation flow - CRITICAL: Check this BEFORE checking for user input
     if processing_status == "ready_for_validation":
         return "validate_info"
     elif processing_status == "validated":
+        logger.info("🔍 ROUTING: Processing status is 'validated', routing to assess_eligibility")
         return "assess_eligibility"
     
     # Check if we need to validate information
@@ -1043,11 +2001,13 @@ def determine_next_action(state: ConversationState) -> str:
         if not validation_results:
             return "validate_info"
         elif validation_results.get("status") == "complete":
+            logger.info("🔍 ROUTING: Validation complete, routing to assess_eligibility")
             return "assess_eligibility"
     
     # Check if ready for eligibility assessment
     if current_step == ConversationStep.ELIGIBILITY_PROCESSING:
         if not state.get("eligibility_result"):
+            logger.info("🔍 ROUTING: In eligibility_processing step without result, routing to assess_eligibility")
             return "assess_eligibility"
         else:
             return "finalize"
@@ -1072,9 +2032,26 @@ def after_document_processing(state: ConversationState) -> str:
 def after_validation(state: ConversationState) -> str:
     """Determine action after validation"""
     validation_results = state.get("validation_results", {})
-    if validation_results.get("status") == "complete" and not validation_results.get("inconsistencies"):
+    
+    # DEBUG: Log the validation results and decision
+    logger.info(f"🔍 AFTER_VALIDATION DEBUG: validation_results = {validation_results}")
+    
+    status = validation_results.get("status")
+    inconsistencies = validation_results.get("inconsistencies", [])
+    
+    logger.info(f"🔍 AFTER_VALIDATION DEBUG: status = '{status}', inconsistencies = {inconsistencies}")
+    
+    # CRITICAL FIX: If validation results are empty but we have minimum data, proceed to eligibility
+    if not validation_results and has_minimum_required_data(state.get("collected_data", {})):
+        logger.warning(f"🔍 AFTER_VALIDATION DEBUG: validation_results empty but have minimum data, proceeding to assess_eligibility")
         return "assess_eligibility"
-    return "continue_conversation"
+    
+    if status == "complete" and not inconsistencies:
+        logger.info(f"🔍 AFTER_VALIDATION DEBUG: Routing to assess_eligibility")
+        return "assess_eligibility"
+    else:
+        logger.info(f"🔍 AFTER_VALIDATION DEBUG: Routing to continue_conversation")
+        return "continue_conversation"
 
 
 def after_eligibility_assessment(state: ConversationState) -> str:
@@ -1109,9 +2086,12 @@ def determine_document_type(file_path: str) -> str:
     """Determine document type from file path"""
     filename = os.path.basename(file_path).lower()
     
-    if any(word in filename for word in ['bank', 'statement', 'transaction']):
+    # Check for bank-related keywords first (before emirates check)
+    # This prevents "Emirates NBD" bank statements from being classified as Emirates ID
+    if any(word in filename for word in ['bank', 'statement', 'transaction', 'nbd', 'account']):
         return "bank_statement"
-    elif any(word in filename for word in ['emirates', 'id', 'identity']):
+    elif any(word in filename for word in ['emirates', 'id', 'identity']) and 'nbd' not in filename:
+        # Only classify as emirates_id if it contains emirates/id keywords but NOT bank-related terms
         return "emirates_id"
     elif any(word in filename for word in ['resume', 'cv', 'curriculum']):
         return "resume"

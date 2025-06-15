@@ -1,234 +1,368 @@
-# Social Support AI Workflow System
+# Social Support AI Workflow
 
-## Government Social Security Department - Automated Application Processing
+An AI-powered social support application processing system that uses conversational AI, document processing, and machine learning to assess eligibility for financial assistance and provide economic enablement recommendations.
 
-This AI-powered system transforms the government social security application process from **5-20 working days to 2-5 minutes** through intelligent automation and real-time decision making.
+## 🎯 Overview
 
-### 🎯 Problem Statement
+This system provides an intelligent, conversational interface for citizens to apply for social support benefits. It combines natural language processing, computer vision for document analysis, and machine learning models to automate the eligibility assessment process while providing personalized economic enablement recommendations.
 
-The current manual application process has several pain points:
-- **Manual Data Gathering**: Manual entry from scanned documents, physical document collection, handwritten forms
-- **Semi-Automated Validations**: Basic form validation requiring significant manual effort
-- **Inconsistent Information**: Discrepancies across different documents and reports
-- **Time-Consuming Reviews**: Multiple rounds involving different departments
-- **Subjective Decision-Making**: Assessment prone to human bias
+## 🏗️ Architecture
 
-### 🚀 Solution Overview
-
-**100% Automated Social Support Application Processing** with:
-- **Multimodal Data Processing**: Text, images, and tabular data (bank statements, Emirates ID, resumes, assets/liabilities Excel, credit reports)
-- **AI Agent Orchestration**: Master orchestrator, data extraction, validation, eligibility check, decision recommendation
-- **Interactive Chatbot Interface**: Natural conversation flow with GenAI
-- **Local ML/LLM Models**: Complete data privacy and control (Ollama integration ready)
-- **Real-time Decision Making**: Instant eligibility assessment within minutes
-
-### 🏗️ Architecture
+### High-Level System Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Streamlit     │    │    FastAPI       │    │ Master          │
-│   Frontend      │◄──►│   Backend        │◄──►│ Orchestrator    │
+│   React Frontend │    │   FastAPI Backend │    │   PostgreSQL DB │
+│                 │◄──►│                  │◄──►│                 │
+│ • Chat Interface│    │ • LangGraph      │    │ • Applications  │
+│ • File Upload   │    │   Workflow       │    │ • Documents     │
+│ • Status Check  │    │ • REST APIs      │    │ • ML Predictions│
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │                        │
-                       ┌────────▼────────┐    ┌─────────▼─────────┐
-                       │   SQLite DB     │    │ Specialized       │
-                       │   ChromaDB      │    │ AI Agents         │
-                       └─────────────────┘    └───────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │   AI Agents      │
+                       │                  │
+                       │ • Conversation   │
+                       │ • Data Extract   │
+                       │ • Eligibility    │
+                       └──────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │   External AI    │
+                       │                  │
+                       │ • Ollama LLM     │
+                       │ • Tesseract OCR  │
+                       │ • ML Models      │
+                       └──────────────────┘
 ```
 
-### 🛠️ Technology Stack (Aligned with Requirements)
+### Data Flow
 
-- **Programming**: Python 3.8+
-- **Data Pipeline**: Pandas, LlamaIndex, ChromaDB, SQLite
-- **AI Pipeline**: 
-  - **Scikit-learn**: Random Forest (eligibility), Gradient Boosting (risk), SVM + Isolation Forest (fraud), K-Means + Logistic Regression (program matching)
-  - **Document Processing**: Tesseract OCR (images), PyPDF2 (PDFs), Pillow (image processing), OpenPyXL (Excel)
-- **Agent Orchestration**: LangGraph, LangChain
-- **Model Hosting**: Ollama integration ready
-- **Model Serving**: FastAPI
-- **Frontend**: Streamlit
-- **Version Control**: Git
+1. **User Interaction**: Citizens interact through a conversational chat interface
+2. **Document Processing**: Users upload documents (Emirates ID, bank statements, etc.)
+3. **Data Extraction**: OCR + LLM extract structured data from documents
+4. **Eligibility Assessment**: ML models + rule-based logic determine eligibility
+5. **Economic Recommendations**: LLM generates personalized improvement suggestions
+6. **Database Storage**: All data and decisions are stored for audit and tracking
 
-### 🤖 AI Agents (Core Requirements)
+## 🚀 Quick Start
 
-#### 1. **Master Orchestrator Agent**
-- Coordinates entire workflow using ReAct reasoning framework
-- Manages document processing → validation → eligibility → recommendations
-- Handles workflow state and error recovery
+### Prerequisites
 
-#### 2. **Data Extraction Agent** 
-- Processes multimodal documents (text, images, tabular data)
-- Extracts structured data from Emirates ID, bank statements, resumes, assets/liabilities Excel, credit reports
-- OCR integration for scanned documents
+- Python 3.8+
+- Node.js 16+
+- PostgreSQL 12+
+- Ollama (for LLM)
+- Tesseract OCR
 
-#### 3. **Data Validation Agent** (Integrated)
-- Validates data consistency across multiple sources
-- Identifies discrepancies and missing information
-- Uses ReAct reasoning for validation logic
+### Installation
 
-#### 4. **Eligibility Check Agent**
-- ML-powered eligibility assessment using multiple algorithms
-- Risk assessment and fraud detection
-- Rule-based fallback for reliability
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd social-support-ai-workflow
+   ```
 
-#### 5. **Decision Recommendation Agent** (Integrated)
-- Final approval/decline decisions
-- Economic enablement recommendations (upskilling, job matching, entrepreneurship, education support)
-- Personalized support amount calculation
+2. **Install Python dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 🚀 Quick Start
+3. **Install frontend dependencies**
+   ```bash
+   cd src/frontend
+   npm install
+   cd ../..
+   ```
 
-#### 1. Installation
+4. **Setup database**
+   ```bash
+   python scripts/setup_database.py
+   ```
+
+5. **Install Tesseract OCR**
+   ```bash
+   python scripts/install_tesseract.py
+   ```
+
+6. **Setup AI models**
+   ```bash
+   python scripts/setup_ai_models.py
+   ```
+
+### Running the Application
+
+**Option 1: Quick Start (Recommended)**
 ```bash
-# Clone repository
-git clone <repository-url>
-cd social-support-ai-workflow
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Tesseract OCR (macOS)
-brew install tesseract
+python start_system.py
 ```
 
-#### 2. Run the System
+**Option 2: Manual Start**
 ```bash
-# Option 1: Run full system (API + Frontend)
-python run_social_support_ai.py --both
+# Terminal 1: Start API
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Option 2: Run components separately
-python run_social_support_ai.py --api      # API only
-python run_social_support_ai.py --frontend # Frontend only
-
-# Option 3: Initial setup and training
-python run_social_support_ai.py --setup
+# Terminal 2: Start Frontend
+cd src/frontend && npm start
 ```
 
-#### 3. Access the Application
-- **Frontend**: http://localhost:8501
+### Access Points
+
+- **Frontend**: http://localhost:3000
+- **API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
-- **ML Endpoints**: http://localhost:8000/ml/status
 
-### 📋 Core Features (Problem Statement Alignment)
+## 🔧 Configuration
 
-#### 1. **Document Ingestion & Processing**
-- **Interactive Application Form**: Streamlit-based conversational interface
-- **Document Attachments**: Bank statements, Emirates ID, resumes, assets/liabilities Excel, credit reports
-- **Multimodal Processing**: Text extraction, OCR for images, Excel parsing
+### Environment Variables
 
-#### 2. **Assessment Criteria Implementation**
-- **Income Level**: Bank statement analysis + application data validation
-- **Employment History**: Resume parsing + employment status verification
-- **Family Size**: Application data + document cross-validation
-- **Wealth Assessment**: Assets/liabilities Excel processing + credit report analysis
-- **Demographic Profile**: Age, medical conditions, housing situation
+Create a `.env` file in the root directory:
 
-#### 3. **Automated Decision Making**
-- **Financial Support Eligibility**: ML-powered classification with confidence scores
-- **Economic Enablement Support**: Personalized recommendations for upskilling, job matching, career counseling
-- **Approval/Decline**: Automated decisions with detailed reasoning
+```env
+# Database
+DATABASE_URL=postgresql://username:password@localhost:5432/social_support_db
 
-#### 4. **Technology Requirements Met**
-- ✅ **Locally Hosted ML Models**: Scikit-learn models with local training
-- ✅ **Multimodal Data Processing**: Text, images, tabular data support
-- ✅ **Interactive Chat**: Conversational application flow
-- ✅ **Agentic AI Orchestration**: Master orchestrator with specialized agents
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+DEBUG=true
 
-### 📊 Demo Scenarios
+# File Upload
+MAX_FILE_SIZE_MB=10
+UPLOAD_PATH=data/uploads
 
-#### Test the system with example conversations:
+# AI Configuration
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_MODEL=llama2
+TESSERACT_PATH=/usr/bin/tesseract
+```
+
+### AI Configuration
+
+The system uses `ai_config.json` for AI model settings:
+
+```json
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "llama2",
+    "base_url": "http://localhost:11434"
+  },
+  "ocr": {
+    "engine": "tesseract",
+    "confidence_threshold": 60
+  },
+  "ml_models": {
+    "eligibility_model": "src/models/eligibility_model.joblib",
+    "support_amount_model": "src/models/support_amount_model.joblib"
+  }
+}
+```
+
+## 📋 Usage
+
+### 1. Starting a New Application
+
+1. Open the frontend at http://localhost:3000
+2. Click "Start New Application"
+3. Follow the conversational flow:
+   - Provide your full name
+   - Enter Emirates ID number
+   - Specify employment status
+   - Enter monthly income
+   - Provide family size
+   - Describe housing situation
+
+### 2. Document Upload
+
+During the conversation, you can upload supporting documents:
+- Emirates ID
+- Bank statements
+- Resume/CV
+- Credit reports
+- Assets/liabilities spreadsheets
+
+### 3. Getting Results
+
+After completing the conversation:
+- Receive eligibility decision
+- Get support amount (if eligible)
+- Access economic enablement recommendations
+- Ask follow-up questions about programs
+
+### 4. Checking Application Status
+
+Use the application lookup feature with:
+- Reference number
+- Emirates ID
+- Name + phone number
+
+## 🧪 Testing
+
+### Running Tests
+
 ```bash
-# Run conversation examples
-python test_conversation.py
+# Run all tests
+python -m pytest tests/
 
-# Test API endpoints
-python example_api_usage.py
+# Run specific test file
+python -m pytest tests/test_agents.py
 
-# Test ML models directly
-curl -X POST "http://localhost:8000/ml/predict/eligibility" \
+# Generate test data
+curl http://localhost:8000/testing/generate-synthetic-data
+```
+
+### Sample Test Flow
+
+```bash
+# Test conversation endpoint
+curl -X POST http://localhost:8000/conversation/message \
   -H "Content-Type: application/json" \
-  -d '{"application_data": {"monthly_income": 3000, "family_size": 4}}'
+  -d '{"message": "John Smith", "conversation_state": {"current_step": "name_collection"}}'
+
+# Test document upload
+curl -X POST http://localhost:8000/conversation/upload-document \
+  -F "file=@sample_document.pdf" \
+  -F "file_type=bank_statement" \
+  -F "conversation_state={}"
 ```
 
-### 📁 Project Structure (Cleaned & Optimized)
+## 🔍 API Reference
 
-```
-social-support-ai-workflow/
-├── src/
-│   ├── agents/                    # Core AI Agents
-│   │   ├── master_orchestrator.py    # Master orchestrator with ReAct reasoning
-│   │   ├── data_extraction_agent.py  # Multimodal document processing
-│   │   ├── conversation_agent.py     # Interactive chat interface
-│   │   ├── eligibility_agent.py      # ML-powered eligibility assessment
-│   │   └── base_agent.py             # Base agent class
-│   ├── api/                       # FastAPI Backend
-│   │   ├── main.py                   # Main API endpoints
-│   │   └── ml_endpoints.py           # ML model API endpoints
-│   ├── frontend/                  # Streamlit Interface
-│   │   ├── main.py                   # Main UI application
-│   │   └── chat_interface.py         # Chat interface components
-│   ├── models/                    # ML Models
-│   │   ├── ml_models.py              # Scikit-learn model implementations
-│   │   └── database.py               # Database models
-│   ├── data/                      # Data Processing
-│   │   ├── document_processor.py     # Document processing utilities
-│   │   └── synthetic_data.py         # Synthetic data generation
-│   ├── services/                  # Business Services
-│   │   ├── llm_service.py            # LLM integration (Ollama ready)
-│   │   └── realtime_processor.py     # Real-time processing
-│   ├── workflows/                 # Workflow Orchestration
-│   │   └── langgraph_workflow.py     # LangGraph workflow implementation
-│   └── utils/                     # Utilities
-│       └── logging_config.py         # Logging configuration
-├── scripts/                       # Setup Scripts
-├── data/                         # Data Storage
-├── models/                       # Trained Models
-├── logs/                         # Application Logs
-└── run_social_support_ai.py      # Main Launcher
+### Core Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/conversation/message` | POST | Process conversation messages |
+| `/conversation/upload-document` | POST | Upload documents during conversation |
+| `/applications/{id}/status` | GET | Get application status |
+| `/applications/lookup` | POST | Lookup applications by various criteria |
+| `/health` | GET | Health check |
+
+### Example API Usage
+
+```python
+import requests
+
+# Send a conversation message
+response = requests.post("http://localhost:8000/conversation/message", json={
+    "message": "I want to apply for financial support",
+    "conversation_state": {},
+    "conversation_history": []
+})
+
+# Upload a document
+with open("emirates_id.jpg", "rb") as f:
+    response = requests.post("http://localhost:8000/conversation/upload-document", 
+        files={"file": f},
+        data={
+            "file_type": "emirates_id",
+            "conversation_state": "{}"
+        }
+    )
 ```
 
-### 🎯 Key Achievements
+## 🏗️ System Components
 
-- **Speed**: 5-20 days → 2-5 minutes processing time
-- **Automation**: 100% automated decision-making capability
-- **Accuracy**: ML-powered assessment with confidence scores
-- **Consistency**: Eliminates human bias through standardized AI assessment
-- **Scalability**: Handles multiple applications simultaneously
-- **Privacy**: Complete local processing, no external API dependencies
-- **Transparency**: Detailed logging and decision explanations
+### Core Agents
 
-### 🔍 Monitoring & Observability
+1. **ConversationAgent** (`src/agents/conversation_agent.py`)
+   - Manages conversational flow
+   - Handles user corrections and navigation
+   - Generates contextual responses
 
-- Comprehensive logging with Loguru
-- Real-time conversation state tracking
-- ML model performance monitoring
-- Document processing status tracking
-- Error handling and recovery mechanisms
-- Workflow step-by-step tracking
+2. **EligibilityAssessmentAgent** (`src/agents/eligibility_agent.py`)
+   - Runs ML-based eligibility assessment
+   - Generates economic enablement recommendations
+   - Performs data validation and fraud detection
 
-### 🧪 Testing
+3. **DataExtractionAgent** (`src/agents/data_extraction_agent.py`)
+   - Processes uploaded documents
+   - Combines OCR and LLM for data extraction
+   - Handles multiple document types
 
-```bash
-# Run tests
-pytest tests/
+### Workflow Engine
 
-# Test specific components
-python test_conversation.py
-python example_api_usage.py
+**LangGraph Workflow** (`src/workflows/langgraph_workflow.py`)
+- State-based conversation management
+- Conditional routing between steps
+- Loop prevention and error recovery
+- Document processing integration
 
-# Test ML models
-python -c "from src.models.ml_models import SocialSupportMLModels; m = SocialSupportMLModels(); print('Models loaded successfully')"
+### Database Models
+
+**PostgreSQL Schema** (`src/models/database.py`)
+- Applications table with comprehensive fields
+- Document storage and tracking
+- ML prediction logging
+- Application reviews and audit trail
+
+### Machine Learning
+
+**ML Models** (`src/models/ml_models.py`)
+- Scikit-learn based eligibility classifier
+- Support amount predictor
+- Feature engineering and preprocessing
+- Model persistence and loading
+
+## 🔒 Security Considerations
+
+- Input validation and sanitization
+- File upload restrictions and scanning
+- Database query parameterization
+- API rate limiting (configurable)
+- Audit logging for all decisions
+- Data encryption in transit and at rest
+
+## 📊 Monitoring and Logging
+
+The system includes comprehensive logging:
+
+```python
+# Logs are structured and include:
+- User interactions and conversation flow
+- Document processing results
+- ML model predictions and confidence scores
+- Error tracking and debugging information
+- Performance metrics and timing
 ```
 
-### 📈 Future Enhancements
+Log files are stored in the `logs/` directory with rotation.
 
-- **LangSmith/Langfuse Integration**: End-to-end AI observability
-- **Ollama Integration**: Local LLM hosting for enhanced privacy
-- **PostgreSQL Migration**: Scalable database backend
-- **Arabic Language Support**: Localized NLP processing
-- **Mobile Application**: Citizen-facing mobile interface
-- **Government Database Integration**: Real-time data verification
+## 🚧 Troubleshooting
 
----
+### Common Issues
 
-**Built for Government Social Security Departments** - Transforming citizen services through AI automation while maintaining complete data privacy and control. 
+1. **Ollama Connection Error**
+   ```bash
+   # Start Ollama service
+   ollama serve
+   
+   # Pull required model
+   ollama pull llama2
+   ```
+
+2. **Database Connection Error**
+   ```bash
+   # Check PostgreSQL service
+   sudo systemctl status postgresql
+   
+   # Create database
+   createdb social_support_db
+   ```
+
+3. **Tesseract Not Found**
+   ```bash
+   # Install Tesseract
+   sudo apt-get install tesseract-ocr  # Ubuntu/Debian
+   brew install tesseract              # macOS
+   ```
+
+4. **Frontend Build Issues**
+   ```bash
+   cd src/frontend
+   rm -rf node_modules package-lock.json
+   npm install
+   ```

@@ -1,0 +1,362 @@
+{
+  "batch_summary": {
+    "total_processed": 1,
+    "successful": 1,
+    "failed": 0,
+    "success_rate": 100.0,
+    "total_names_found": 31,
+    "total_salaries_found": 24,
+    "emirates_ids_found": 0,
+    "average_confidence": 82.87192118226601,
+    "timestamp": "2025-06-15T20:46:17.102205"
+  },
+  "individual_results": [
+    {
+      "image_path": "data/uploads/UAE-Dubai-Emirates-NBD.jpg",
+      "processing_info": {
+        "best_method": "basic_threshold",
+        "ocr_confidence": 82.87192118226601,
+        "text_length": 1499,
+        "preprocessing_methods_tried": 4
+      },
+      "extracted_data": {
+        "names": [
+          {
+            "name": "JOHN CITIZEN Branch Baniyas Road",
+            "pattern": "(?:name|full name|employee name|holder name)[\\s:]+([A-Za-z\\s]{2,50})",
+            "confidence": "high"
+          },
+          {
+            "name": "EMIRATES NBD",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "ACCOUNT DETAILS",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Emirates NBD\nAccount Statement\n\nStatement From",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Currency AED\n\nAccount Number",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Account Type CURRENT ACCOUNT",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Name JOHN CITIZEN Branch Baniyas Road",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Address Sheikh Zayed Road",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "UAE\nDubai",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Opening Balance AED",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Date Description Debit",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "Credit Account Balance",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "UAE SWITCH EDL",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "SERVICE CHGS",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "ATM CARD NO",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "UAE SWITCH WDL",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "DR ATM TRANSACTION CARD",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "TRANSFER From",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "DAWOOD KHAN CHO",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "SALARY CREDIT Salary AED",
+            "pattern": "([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+            "confidence": "high"
+          },
+          {
+            "name": "ATM TRANSACTION CARD",
+            "pattern": "(?:mr|ms|mrs|dr)\\.?\\s+([A-Za-z\\s]{2,50})",
+            "confidence": "high"
+          },
+          {
+            "name": "Emirates NBD\nAccount",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Statement\n\nStatement From",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Currency AED\n\nAccount",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Account Type CURRENT",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Name JOHN CITIZEN",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Branch Baniyas Road",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Address Sheikh Zayed",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "DR ATM TRANSACTION",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "SALARY CREDIT Salary",
+            "pattern": "([A-Za-z]+\\s+[A-Za-z]+\\s+[A-Za-z]+)",
+            "confidence": "high"
+          },
+          {
+            "name": "Account Statement",
+            "pattern": "line_analysis",
+            "confidence": "medium"
+          }
+        ],
+        "salaries": [
+          {
+            "amount": 10000.0,
+            "formatted": "10,000.00",
+            "original_text": "Salary AED 10,000.00",
+            "pattern": "(?:salary|income|wage|gross|net|basic)[\\s:]+(?:aed|usd|eur|gbp)?\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "high"
+          },
+          {
+            "amount": 17369.0,
+            "formatted": "17,369.00",
+            "original_text": "AED 17,369.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 15000.0,
+            "formatted": "15,000.00",
+            "original_text": "AED 15,000.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 11373.0,
+            "formatted": "11,373.00",
+            "original_text": "AED 11,373.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 11371.0,
+            "formatted": "11,371.00",
+            "original_text": "AED 11,371.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 6371.0,
+            "formatted": "6,371.00",
+            "original_text": "AED 6,371.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 6369.0,
+            "formatted": "6,369.00",
+            "original_text": "AED 6,369.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 5000.0,
+            "formatted": "5,000.00",
+            "original_text": "AED 5,000.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 4000.0,
+            "formatted": "4,000.00",
+            "original_text": "AED 4,000.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 2369.0,
+            "formatted": "2,369.00",
+            "original_text": "AED 2,369.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 2367.0,
+            "formatted": "2,367.00",
+            "original_text": "AED 2,367.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 2267.0,
+            "formatted": "2,267.00",
+            "original_text": "AED 2,267.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 2265.0,
+            "formatted": "2,265.00",
+            "original_text": "AED 2,265.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 2165.0,
+            "formatted": "2,165.00",
+            "original_text": "AED 2,165.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 1375.0,
+            "formatted": "1,375.00",
+            "original_text": "AED 1,375.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 1373.0,
+            "formatted": "1,373.00",
+            "original_text": "AED 1,373.00",
+            "pattern": "(?:aed|usd|eur|gbp)\\s*([0-9,]+(?:\\.[0-9]{2})?)",
+            "confidence": "medium"
+          },
+          {
+            "amount": 858392.0,
+            "formatted": "858,392.00",
+            "original_text": "0000000858392",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 443911.0,
+            "formatted": "443,911.00",
+            "original_text": "443911",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 9023.0,
+            "formatted": "9,023.00",
+            "original_text": "9023",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 8352.0,
+            "formatted": "8,352.00",
+            "original_text": "000000008352",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 5441.0,
+            "formatted": "5,441.00",
+            "original_text": "5441",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 2024.0,
+            "formatted": "2,024.00",
+            "original_text": "2024",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 2021.0,
+            "formatted": "2,021.00",
+            "original_text": "2021",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          },
+          {
+            "amount": 777.0,
+            "formatted": "777.00",
+            "original_text": "777",
+            "pattern": "standalone_number",
+            "confidence": "low"
+          }
+        ],
+        "emirates_id": null,
+        "raw_text": "EMIRATES NBD | ACCOUNTS | ACCOUNT DETAILS 08/08/2021 16:07\n0] Emirates NBD\nAccount Statement\n\nStatement From: 08 May 2021 to 08 Aug 2024 Currency AED\n\nAccount Number 1015261069101 (AE2302600010) Account Type CURRENT ACCOUNT\n\n(IBAN)\n\nName JOHN CITIZEN Branch Baniyas Road, Deira,\n\nP.O. Box 777,\nAddress Sheikh Zayed Road, Dubai, UAE\nDubai, 214\n\nOpening Balance AED 1,375.00\n\nDate Description Debit/Credit Account Balance\n\n06-Aug-21 UAE SWITCH EDL 721817412985 -AED 100.00 AED 2,165.00\n06-08-2021 17:38:51 00000102\n\n06-Aug-21 SERVICE CHGS-ATM CARD NO. -AED 2.00 AED 2,265.00\n443911******9023 00000102\n\n05-Aug-21 UAE SWITCH WDL 721720412748 -AED 100.00 AED 2,267.00\n05-08-2021 20:58:01 00000102\n\n05-Aug-21 SERVICE CHGS-ATM CARD NO. \u201cAED 2.00 AED 2,367.00\n443911******9023 00000102\n\n03-Aug-21 DR ATM TRANSACTION CARD -AED 15,000.00 AED 2,369.00\nNO,443911******9023 4010838\n\n03-Aug-21 TRANSFER From 1011447974501- AED 15,000.00 AED 17,369.00\nDAWOOD KHAN CHO.NO.-00\n\n02-Aug-21 UAE SWITCH WDL 000000008352 \u201cAED 4,000.00 AED 2,369.00\n02-08-2021 12:02:25 5441 DUBAI\n\n02-Aug-21 SERVICE CHGS-ATM CARD NO. -AED 2.00 AED 6,369.00\n443911******9023 5441 DUBA)\n\n02-Aug-21 UAE SWITCH WDL 000000008352 -AED 5,000.00 AED 6,371.00\n02-08-2021 12:01:58 5441 DUBAI\n\n02-Aug-21 SERVICE CHGS-ATM CARD NO. -AED 2.00 AED 11,371.00\n443911******9023 00000102\n\n30-Jul-21 SALARY CREDIT Salary AED 10,000.00 AED 11,373.00\n0000000858392 30/07/2021\n\n29-Jul-21 SERVICE CHGS-ATM CARD NO. -AED 2.00 AED 1,373.00\n443911******9023 SDUD069\n"
+      },
+      "summary": {
+        "names_found": 31,
+        "salaries_found": 24,
+        "has_emirates_id": false,
+        "top_name": "JOHN CITIZEN Branch Baniyas Road",
+        "top_salary": "10,000.00"
+      }
+    }
+  ]
+}

@@ -392,8 +392,15 @@ class ConversationAgent(BaseAgent):
         # Check for proceed/continue keywords
         proceed_keywords = ["proceed", "continue", "evaluate", "assessment", "skip", "done", "finished", "ready", "go ahead", "next"]
         if any(word in message_lower for word in proceed_keywords):
-            # User wants to proceed with assessment
-            return await self._proceed_to_eligibility_assessment(collected_data)
+            # CRITICAL FIX: Don't directly proceed to eligibility assessment
+            # Let the LangGraph workflow handle document processing first
+            return {
+                "message": "Perfect! I'll now process any uploaded documents and then proceed with your eligibility assessment. This may take a moment...",
+                "state_update": {
+                    "current_step": ConversationStep.ELIGIBILITY_PROCESSING,
+                    "ready_for_assessment": True
+                }
+            }
         
         # Check for upload confirmation keywords (user indicating they've uploaded something)
         upload_confirmation_keywords = ["uploaded", "done uploading", "finished uploading", "sent", "attached", "submitted"]
@@ -529,42 +536,108 @@ What would you like to know more about?""",
         # Get economic enablement from eligibility result if available
         economic_enablement = eligibility_result.get("economic_enablement", {})
         
-        if economic_enablement:
+        # FIXED: Check if we have LLM-generated recommendations first
+        if economic_enablement.get("recommendations_text"):
+            # We have LLM-generated recommendations - use them directly
+            response = economic_enablement["recommendations_text"]
+            logger.info("Using LLM-generated economic enablement recommendations")
+        
+        elif economic_enablement and (
+            economic_enablement.get("recommendations") or 
+            economic_enablement.get("training_programs") or 
+            economic_enablement.get("job_opportunities") or
+            economic_enablement.get("summary")
+        ):
+            # We have structured economic enablement data from EligibilityAssessmentAgent
             response = "## 🚀 Economic Enablement Recommendations\n\n"
-            response += economic_enablement.get("summary", "Here are personalized recommendations to improve your financial situation:")
             
-            if "recommendations" in economic_enablement and economic_enablement["recommendations"]:
+            # Add summary if available
+            if economic_enablement.get("summary"):
+                response += economic_enablement["summary"]
+            else:
+                response += "Here are personalized recommendations to improve your financial situation:"
+            
+            # Add key recommendations if available
+            if economic_enablement.get("recommendations") and isinstance(economic_enablement["recommendations"], list):
                 response += "\n\n**Key Recommendations:**\n"
-                for rec in economic_enablement["recommendations"]:
+                for rec in economic_enablement["recommendations"][:5]:  # Show top 5
                     response += f"• {rec}\n"
             
-            if "training_programs" in economic_enablement and economic_enablement["training_programs"]:
+            # Add training programs if available
+            if economic_enablement.get("training_programs") and isinstance(economic_enablement["training_programs"], list):
                 response += "\n\n**📚 Training Programs Available:**\n"
-                for program in economic_enablement["training_programs"][:3]:
-                    response += f"• **{program.get('name', 'Training Program')}** - {program.get('duration', 'Various durations')}\n"
-                    if program.get('description'):
-                        response += f"  {program['description']}\n"
+                for program in economic_enablement["training_programs"][:3]:  # Show top 3
+                    if isinstance(program, dict):
+                        name = program.get('name', 'Training Program')
+                        duration = program.get('duration', 'Various durations')
+                        description = program.get('description', '')
+                        response += f"• **{name}** - {duration}\n"
+                        if description:
+                            response += f"  {description}\n"
+                    else:
+                        response += f"• {program}\n"
             
-            if "job_opportunities" in economic_enablement and economic_enablement["job_opportunities"]:
+            # Add job opportunities if available
+            if economic_enablement.get("job_opportunities") and isinstance(economic_enablement["job_opportunities"], list):
                 response += "\n\n**💼 Job Opportunities:**\n"
-                for job in economic_enablement["job_opportunities"][:3]:
-                    response += f"• **{job.get('title', 'Job Opportunity')}** at {job.get('company', 'Various Companies')}\n"
-                    if job.get('salary_range'):
-                        response += f"  Salary: {job['salary_range']}\n"
+                for job in economic_enablement["job_opportunities"][:3]:  # Show top 3
+                    if isinstance(job, dict):
+                        title = job.get('title', 'Job Opportunity')
+                        company = job.get('company', 'Various Companies')
+                        salary_range = job.get('salary_range', '')
+                        response += f"• **{title}** at {company}\n"
+                        if salary_range:
+                            response += f"  Salary: {salary_range}\n"
+                    else:
+                        response += f"• {job}\n"
             
-            if "counseling_services" in economic_enablement and economic_enablement["counseling_services"]:
+            # Add counseling services if available
+            if economic_enablement.get("counseling_services") and isinstance(economic_enablement["counseling_services"], list):
                 response += "\n\n**🤝 Support Services:**\n"
-                for service in economic_enablement["counseling_services"]:
-                    response += f"• {service}\n"
+                for service in economic_enablement["counseling_services"][:3]:  # Show top 3
+                    if isinstance(service, dict):
+                        service_name = service.get('service', service.get('name', 'Support Service'))
+                        provider = service.get('provider', '')
+                        description = service.get('description', '')
+                        response += f"• **{service_name}**"
+                        if provider:
+                            response += f" - {provider}"
+                        response += "\n"
+                        if description:
+                            response += f"  {description}\n"
+                    else:
+                        response += f"• {service}\n"
+            
+            # Add financial programs if available
+            if economic_enablement.get("financial_programs") and isinstance(economic_enablement["financial_programs"], list):
+                response += "\n\n**💰 Financial Programs:**\n"
+                for program in economic_enablement["financial_programs"][:3]:  # Show top 3
+                    if isinstance(program, dict):
+                        program_name = program.get('program', program.get('name', 'Financial Program'))
+                        provider = program.get('provider', '')
+                        description = program.get('description', '')
+                        response += f"• **{program_name}**"
+                        if provider:
+                            response += f" - {provider}"
+                        response += "\n"
+                        if description:
+                            response += f"  {description}\n"
+                    else:
+                        response += f"• {program}\n"
+            
+            logger.info("Using structured economic enablement recommendations from EligibilityAssessmentAgent")
         
         else:
-            # Generate LLM-powered personalized recommendations
+            # Generate fresh LLM-powered personalized recommendations
             try:
+                logger.info("No existing recommendations found, generating fresh LLM recommendations")
                 llm_recommendations = await self._generate_llm_economic_recommendations(collected_data, eligibility_result)
                 if llm_recommendations.get("status") == "success":
                     response = llm_recommendations["response"]
+                    logger.info("Successfully generated fresh LLM recommendations")
                 else:
                     # Fallback to hardcoded recommendations if LLM fails
+                    logger.warning("LLM recommendations failed, using fallback")
                     response = self._generate_fallback_economic_recommendations(employment_status, monthly_income)
             except Exception as e:
                 logger.error(f"Error generating LLM recommendations: {str(e)}")

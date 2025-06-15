@@ -97,8 +97,8 @@ def show_interactive_buttons():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("Ahmed Al Mansouri", key="btn_name_1", help="Test name 1"):
-                handle_button_click("Ahmed Al Mansouri")
+            if st.button("JOHN CITIZEN", key="btn_name_1", help="Test name 1"):
+                handle_button_click("JOHN CITIZEN")
         
         with col2:
             if st.button("Fatima Al Zahra", key="btn_name_2", help="Test name 2"):
@@ -110,8 +110,8 @@ def show_interactive_buttons():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("784-1990-1234567-1", key="btn_id_1", help="Test Emirates ID 1"):
-                handle_button_click("784-1990-1234567-1")
+            if st.button("784-1985-7654321-1", key="btn_id_1", help="Test Emirates ID 1"):
+                handle_button_click("784-1985-7654321-1")
         
         with col2:
             if st.button("784-1985-7654321-2", key="btn_id_2", help="Test Emirates ID 2"):
@@ -210,15 +210,131 @@ def show_interactive_buttons():
     # Document Collection Buttons
     elif current_step == "document_collection":
         st.markdown("### 📄 Document Upload Options:")
-        col1, col2 = st.columns(2)
         
-        with col1:
-            if st.button("📤 Upload More Documents", use_container_width=True, key="btn_upload_more"):
-                st.info("👆 Use the file uploader in the sidebar to add more documents")
+        # Inline file uploader
+        st.markdown("**Upload your documents here:**")
+        uploaded_files = st.file_uploader(
+            "Choose files to upload",
+            accept_multiple_files=True,
+            type=['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx', 'xls', 'xlsx'],
+            key="inline_file_uploader",
+            help="Supported formats: PDF, Images (JPG, PNG), Word documents, Excel files"
+        )
         
-        with col2:
-            if st.button("✅ Proceed with Assessment", use_container_width=True, key="btn_proceed"):
-                handle_button_click("proceed with assessment")
+        if uploaded_files:
+            st.markdown("**Files ready to process:**")
+            for uploaded_file in uploaded_files:
+                st.write(f"📎 {uploaded_file.name} ({uploaded_file.size:,} bytes)")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🚀 Process Documents", key="process_docs_inline_btn", use_container_width=True, type="primary"):
+                    with st.spinner("Processing documents..."):
+                        for uploaded_file in uploaded_files:
+                            try:
+                                response_message = process_document_upload(uploaded_file)
+                                
+                                # Add the document processing response to chat
+                                st.session_state.conversation_messages.append({
+                                    "role": "assistant", 
+                                    "content": response_message
+                                })
+                                
+                                # Update uploaded documents list in conversation state
+                                if "uploaded_documents" not in st.session_state.conversation_state:
+                                    st.session_state.conversation_state["uploaded_documents"] = []
+                                
+                                file_path = f"data/uploads/{uploaded_file.name}"
+                                if file_path not in st.session_state.conversation_state["uploaded_documents"]:
+                                    st.session_state.conversation_state["uploaded_documents"].append(file_path)
+                                
+                            except Exception as e:
+                                error_message = f"Error processing {uploaded_file.name}: {str(e)}"
+                                st.session_state.conversation_messages.append({
+                                    "role": "assistant",
+                                    "content": error_message
+                                })
+                        
+                        st.success("✅ Documents processed!")
+                        st.rerun()
+            
+            with col2:
+                if st.button("✅ Proceed with Assessment", use_container_width=True, key="btn_proceed_after_upload"):
+                    handle_button_click("proceed with assessment")
+        else:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📤 Upload Documents Above", use_container_width=True, key="btn_upload_prompt"):
+                    st.info("👆 Use the file uploader above to upload your documents")
+            
+            with col2:
+                if st.button("✅ Proceed with Assessment", use_container_width=True, key="btn_proceed"):
+                    handle_button_click("proceed with assessment")
+        
+        # Document type guidance
+        with st.expander("📋 What documents should I upload?"):
+            st.markdown("""
+            **Identity Documents:**
+            - Emirates ID (front/back)
+            - Passport copy
+            
+            **Financial Documents:**
+            - Bank statements (3-6 months)
+            - Salary certificates
+            - Employment letters
+            
+            **Supporting Documents:**
+            - Family book/certificates
+            - Medical reports (if applicable)
+            - Housing contracts
+            - Assets/liabilities statements
+            """)
+    
+    # Add file uploader to other relevant steps as well
+    elif current_step in ["identity_verification", "income_assessment", "housing_situation"]:
+        st.markdown("---")
+        st.markdown("### 📎 Optional: Upload Supporting Documents")
+        
+        uploaded_files = st.file_uploader(
+            "Upload documents to support your application",
+            accept_multiple_files=True,
+            type=['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx', 'xls', 'xlsx'],
+            key=f"optional_uploader_{current_step}",
+            help="Upload relevant documents like Emirates ID, bank statements, etc."
+        )
+        
+        if uploaded_files:
+            if st.button("🚀 Process Documents", key=f"process_optional_{current_step}", use_container_width=True):
+                with st.spinner("Processing documents..."):
+                    for uploaded_file in uploaded_files:
+                        try:
+                            response_message = process_document_upload(uploaded_file)
+                            
+                            # Add the document processing response to chat
+                            st.session_state.conversation_messages.append({
+                                "role": "assistant", 
+                                "content": response_message
+                            })
+                            
+                            # Update uploaded documents list in conversation state
+                            if "uploaded_documents" not in st.session_state.conversation_state:
+                                st.session_state.conversation_state["uploaded_documents"] = []
+                            
+                            file_path = f"data/uploads/{uploaded_file.name}"
+                            if file_path not in st.session_state.conversation_state["uploaded_documents"]:
+                                st.session_state.conversation_state["uploaded_documents"].append(file_path)
+                            
+                        except Exception as e:
+                            error_message = f"Error processing {uploaded_file.name}: {str(e)}"
+                            st.session_state.conversation_messages.append({
+                                "role": "assistant",
+                                "content": error_message
+                            })
+                    
+                    st.success("✅ Documents processed!")
+                    st.rerun()
     
     # Completion Step Buttons
     elif current_step == "completion":
@@ -517,7 +633,7 @@ def show_help_info():
     
     1. **Answer Questions**: I'll ask you questions step by step
     2. **Use Buttons**: Click the buttons for quick responses
-    3. **Upload Documents**: Use the sidebar to upload supporting documents
+    3. **Upload Documents**: Use the file uploader that appears during the conversation
     4. **Type Responses**: You can also type your answers in the chat
     
     **Supported Documents:**
