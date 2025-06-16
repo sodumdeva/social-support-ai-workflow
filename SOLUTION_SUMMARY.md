@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document presents a comprehensive AI-powered social support application processing system that transforms traditional manual government processes into an intelligent, automated workflow. The solution combines conversational AI, document processing, machine learning, and ChromaDB vector search to provide citizens with an intuitive interface for applying for financial assistance while delivering accurate, consistent, and rapid eligibility assessments with personalized economic enablement recommendations.
+This document presents a comprehensive AI-powered social support application processing system that transforms traditional manual government processes into an intelligent, automated workflow. The solution combines conversational AI, document processing, machine learning, and ChromaDB vector search to provide citizens with an intuitive interface for applying for financial assistance rapid eligibility assessments with personalized economic enablement recommendations.
 
 ## 1. High-Level Architecture
 
@@ -122,12 +122,12 @@ Database Storage → Economic Recommendations → LLM Enhancement → User Respo
 - **Performance**: One of the fastest Python frameworks available
 - **Security**: Built-in input validation and sanitization
 
-#### **React (Frontend Framework)**
-- **Suitability**: Component-based architecture ideal for interactive chat interfaces
-- **Scalability**: Virtual DOM and efficient rendering for large applications
-- **Maintainability**: Strong ecosystem and development tools
-- **Performance**: Optimized rendering and state management
-- **Security**: XSS protection and secure component patterns
+#### **Streamlit (Frontend Framework)**
+- **Suitability**: Rapid prototyping framework ideal for AI/ML applications with built-in chat components
+- **Scalability**: Efficient for demo and prototype applications with real-time updates
+- **Maintainability**: Python-native development reducing technology stack complexity
+- **Performance**: Fast development cycle with automatic UI updates
+- **Security**: Server-side rendering with built-in session management
 
 #### **PostgreSQL (Database)**
 - **Suitability**: ACID compliance essential for government applications
@@ -145,12 +145,61 @@ Database Storage → Economic Recommendations → LLM Enhancement → User Respo
 - **Performance**: Optimized C implementations with Python interface
 - **Security**: Local model execution with no data leakage
 
+#### **ML Model Selection Strategy**
+The system employs specialized machine learning models for different prediction tasks:
+
+**RandomForestClassifier (Eligibility Assessment)**
+- **Purpose**: Binary classification for eligibility determination (eligible/not eligible)
+- **Justification**: Handles mixed data types well, resistant to overfitting, provides feature importance
+- **Use Case**: Analyzing income, family size, employment status, housing situation for eligibility
+- **Advantages**: 
+  - Robust to outliers and missing values
+  - Provides interpretable decision paths
+  - Handles categorical and numerical features naturally
+  - Built-in feature importance for transparency
+
+**RandomForestRegressor (Support Amount Prediction)**
+- **Purpose**: Predicting the monetary support amount for eligible applicants
+- **Justification**: Excellent for non-linear relationships in financial data
+- **Use Case**: Calculating appropriate support amounts based on family needs and income gaps
+- **Advantages**:
+  - Captures complex interactions between features
+  - Provides prediction intervals for uncertainty quantification
+  - Stable predictions across different data distributions
+  - Less prone to overfitting than single decision trees
+
+**StandardScaler (Feature Preprocessing)**
+- **Purpose**: Normalizing numerical features for consistent model input
+- **Justification**: Ensures all features contribute equally to model decisions
+- **Use Case**: Scaling income, family size, age, and other numerical variables
+- **Advantage**: Improves model convergence and prevents feature dominance
+
+**Model Configuration Rationale**:
+- **n_estimators=100**: Balanced between performance and computational efficiency
+- **max_depth=10**: Prevents overfitting while capturing feature interactions
+- **random_state=42**: Ensures reproducible results for audit and debugging
+
 #### **Ollama (LLM Hosting)**
 - **Suitability**: Local LLM hosting for privacy-sensitive applications
 - **Scalability**: Supports multiple model sizes and concurrent requests
 - **Maintainability**: Simple deployment and model management
 - **Performance**: GPU acceleration and efficient inference
 - **Security**: Complete data privacy with local processing
+
+#### **Model Selection Strategy**
+The system employs multiple specialized models for different tasks:
+
+**llama2 (Conversational Agent)**
+- **Purpose**: Primary conversational interface and user interaction
+- **Justification**: Excellent natural language understanding and generation capabilities
+- **Use Case**: Handling user queries, generating responses, conversation flow management
+- **Size**: 7B parameters - optimal balance of performance and resource usage
+
+**codellama (Data Extraction Agent)**
+- **Purpose**: Structured data extraction from documents and OCR text
+- **Justification**: Specialized for code and structured data understanding
+- **Use Case**: Parsing bank statements, extracting Emirates ID data, processing Excel files
+- **Advantage**: Superior performance in understanding structured formats and JSON generation
 
 #### **ChromaDB (Vector Database)**
 - **Suitability**: Purpose-built for semantic search and similarity matching
@@ -316,15 +365,12 @@ GradientBoostingRegressor(
 ### 6.1 Privacy-First Design
 
 - **Local Processing**: All AI models run locally (Ollama, ChromaDB)
-- **No External APIs**: No data sent to third-party services
-- **Encrypted Storage**: Database encryption at rest
 - **Audit Trails**: Comprehensive logging for accountability
 
 ### 6.2 Data Validation
 
 - **Input Sanitization**: All user inputs validated and sanitized
 - **Document Verification**: OCR confidence scoring and validation
-- **Fraud Detection**: ML-based anomaly detection
 - **Consistency Checks**: Cross-document validation
 
 ## 7. Performance Characteristics
@@ -337,54 +383,32 @@ GradientBoostingRegressor(
 - **ChromaDB Search**: < 1 second
 - **Complete Application**: 2-5 minutes
 
-### 7.2 Scalability Metrics
+## 7. System Reliability
 
-- **Concurrent Users**: 50+ simultaneous conversations
-- **Document Throughput**: 100+ documents/hour
-- **Database Capacity**: 1M+ applications
-- **Vector Search**: 10K+ training programs/jobs
-
-## 8. System Reliability
-
-### 8.1 Error Handling
+### 7.1 Error Handling
 
 - **Graceful Degradation**: Fallback mechanisms at every level
 - **User-Friendly Messages**: Clear error communication
-- **Automatic Recovery**: Self-healing workflows
 - **Comprehensive Logging**: Detailed error tracking
 
-### 8.2 Fallback Mechanisms
+### 7.2 Fallback Mechanisms
 
 - **LLM Failures**: Multiple model fallbacks (llama2 → mistral → phi)
 - **ChromaDB Issues**: Static recommendation fallbacks
 - **OCR Failures**: Manual data entry options
 - **Database Issues**: Local caching and retry logic
 
-## 9. Deployment and Operations
 
-### 9.1 System Requirements
+## 8. Future Enhancements
 
-- **Hardware**: 8GB+ RAM, 4+ CPU cores, 50GB+ storage
-- **Software**: Python 3.8+, Node.js 16+, PostgreSQL 12+
-- **Network**: Local network sufficient (no internet required for operation)
-
-### 9.2 Monitoring and Maintenance
-
-- **Health Checks**: Automated system monitoring
-- **Performance Metrics**: Response time and throughput tracking
-- **Error Alerting**: Automated issue detection
-- **Regular Backups**: Database and model persistence
-
-## 10. Future Enhancements
-
-### 10.1 Planned Features
+### 8.1 Planned Features
 
 - **Multi-language Support**: Arabic and English interfaces
 - **Mobile Application**: Native mobile apps
 - **Advanced Analytics**: Predictive modeling for program success
 - **Integration APIs**: Connection to external government systems
 
-### 10.2 Scalability Roadmap
+### 8.2 Scalability Roadmap
 
 - **Microservices Architecture**: Service decomposition for scale
 - **Container Deployment**: Docker and Kubernetes support

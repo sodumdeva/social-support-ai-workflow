@@ -12,7 +12,7 @@ This system provides an intelligent, conversational interface for citizens to ap
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   React Frontend │    │   FastAPI Backend │    │   PostgreSQL DB │
+│Stremlit Frontend│    │  FastAPI Backend │    │   PostgreSQL DB │
 │                 │◄──►│                  │◄──►│                 │
 │ • Chat Interface│    │ • LangGraph      │    │ • Applications  │
 │ • File Upload   │    │   Workflow       │    │ • Documents     │
