@@ -48,28 +48,22 @@ class SocialSupportVectorStore:
         
         collection_configs = {
             "applications": {
-                "metadata": {"description": "Complete application profiles for similarity matching"},
-                "embedding_function": None  # Use default
+                "metadata": {"description": "Complete application profiles for similarity matching"}
             },
             "documents": {
-                "metadata": {"description": "Extracted document content for semantic search"},
-                "embedding_function": None
+                "metadata": {"description": "Extracted document content for semantic search"}
             },
             "historical_decisions": {
-                "metadata": {"description": "Past eligibility decisions for consistency checking"},
-                "embedding_function": None
+                "metadata": {"description": "Past eligibility decisions for consistency checking"}
             },
             "training_programs": {
-                "metadata": {"description": "Available training and enablement programs"},
-                "embedding_function": None
+                "metadata": {"description": "Available training and enablement programs"}
             },
             "job_opportunities": {
-                "metadata": {"description": "Job matching database for recommendations"},
-                "embedding_function": None
+                "metadata": {"description": "Job matching database for recommendations"}
             },
             "inconsistency_patterns": {
-                "metadata": {"description": "Known patterns of document inconsistencies"},
-                "embedding_function": None
+                "metadata": {"description": "Known patterns of document inconsistencies"}
             }
         }
         
@@ -80,10 +74,10 @@ class SocialSupportVectorStore:
                 logger.info(f"Loaded existing collection: {name}")
             except ValueError:
                 # Create new collection if it doesn't exist
+                # ChromaDB will use default embedding function if none specified
                 collection = self.client.create_collection(
                     name=name,
-                    metadata=config["metadata"],
-                    embedding_function=config["embedding_function"]
+                    metadata=config["metadata"]
                 )
                 logger.info(f"Created new collection: {name}")
             
@@ -258,10 +252,14 @@ class SocialSupportVectorStore:
             programs = []
             if results["documents"] and results["documents"][0]:
                 for i, doc in enumerate(results["documents"][0]):
+                    distance = results["distances"][0][i]
+                    # Convert distance to similarity score (closer to 0 = more similar)
+                    relevance_score = max(0, 1 - distance) if distance <= 1 else 1 / (1 + distance)
+                    
                     programs.append({
                         "program_description": doc,
                         "metadata": results["metadatas"][0][i],
-                        "relevance_score": 1 - results["distances"][0][i]
+                        "relevance_score": relevance_score
                     })
             
             logger.info(f"Found {len(programs)} relevant training programs")
@@ -269,6 +267,40 @@ class SocialSupportVectorStore:
             
         except Exception as e:
             logger.error(f"Error finding training programs: {str(e)}")
+            return []
+    
+    async def get_relevant_job_opportunities(self, user_profile: Dict[str, Any], n_results: int = 5) -> List[Dict[str, Any]]:
+        """Get relevant job opportunities based on user profile"""
+        
+        try:
+            # Create profile query text for job matching
+            profile_text = self._create_job_profile_summary(user_profile)
+            
+            # Search for relevant job opportunities
+            results = self.collections["job_opportunities"].query(
+                query_texts=[profile_text],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"]
+            )
+            
+            jobs = []
+            if results["documents"] and results["documents"][0]:
+                for i, doc in enumerate(results["documents"][0]):
+                    distance = results["distances"][0][i]
+                    # Convert distance to similarity score (closer to 0 = more similar)
+                    relevance_score = max(0, 1 - distance) if distance <= 1 else 1 / (1 + distance)
+                    
+                    jobs.append({
+                        "job_description": doc,
+                        "metadata": results["metadatas"][0][i],
+                        "relevance_score": relevance_score
+                    })
+            
+            logger.info(f"Found {len(jobs)} relevant job opportunities")
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Error finding job opportunities: {str(e)}")
             return []
     
     async def get_historical_decision_context(self, current_application: Dict[str, Any], n_results: int = 3) -> List[Dict[str, Any]]:
@@ -343,6 +375,24 @@ class SocialSupportVectorStore:
         Skills: {', '.join(skills) if skills else 'No specific skills listed'}
         Education Level: {education}
         Looking for: career development, job opportunities, skills training
+        """
+    
+    def _create_job_profile_summary(self, user_profile: Dict[str, Any]) -> str:
+        """Create searchable text summary of user profile for job matching"""
+        
+        employment_status = user_profile.get("employment_status", "unknown")
+        skills = user_profile.get("skills", [])
+        education = user_profile.get("education_level", "unknown")
+        monthly_income = user_profile.get("monthly_income", 0)
+        work_experience = user_profile.get("work_experience_years", 0)
+        
+        return f"""
+        Employment Status: {employment_status}
+        Current Income: {monthly_income} AED
+        Skills: {', '.join(skills) if skills else 'No specific skills listed'}
+        Education Level: {education}
+        Work Experience: {work_experience} years
+        Looking for: job opportunities, employment, career advancement
         """
     
     async def populate_sample_data(self):

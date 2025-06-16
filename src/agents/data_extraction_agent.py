@@ -567,7 +567,7 @@ class DataExtractionAgent(BaseAgent):
             response = requests.post(
                 f"{self.ollama_base_url}/api/generate",
                 json=payload,
-                timeout=120  # Longer timeout for multimodal processing
+                timeout=300  # Longer timeout for multimodal processing
             )
             
             processing_time = (datetime.now() - start_time).total_seconds() * 1000

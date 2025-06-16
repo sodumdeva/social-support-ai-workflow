@@ -1,17 +1,17 @@
 # Complete Installation Guide - Social Support AI Workflow
 
-This guide provides step-by-step instructions to set up the complete Social Support AI Workflow system with local LLMs and all dependencies.
+This guide provides step-by-step instructions to set up the complete Social Support AI Workflow system with local LLMs, ChromaDB vector search, and all dependencies.
 
 ## 📋 System Requirements
 
 ### Hardware Requirements
 - **RAM**: Minimum 8GB, Recommended 16GB+ (for local LLMs)
-- **Storage**: 20GB+ free space (for models and data)
+- **Storage**: 25GB+ free space (for models, data, and ChromaDB)
 - **CPU**: Multi-core processor (4+ cores recommended)
 - **GPU**: Optional but recommended for faster LLM inference
 
 ### Software Requirements
-- **Python**: 3.8 or higher
+- **Python**: 3.8 or higher (3.11 recommended)
 - **Node.js**: 16.0 or higher
 - **PostgreSQL**: 12.0 or higher
 - **Git**: Latest version
@@ -29,7 +29,7 @@ cd social-support-ai-workflow
 python scripts/complete_setup.py
 ```
 
-This will automatically install all dependencies, set up the database, install local LLMs, and configure the system.
+This will automatically install all dependencies, set up the database, install local LLMs, initialize ChromaDB with sample data, and configure the system.
 
 ## 📝 Manual Installation (Step-by-Step)
 
@@ -87,7 +87,7 @@ source venv/bin/activate
 # Upgrade pip
 pip install --upgrade pip
 
-# Install Python dependencies
+# Install Python dependencies (includes ChromaDB)
 pip install -r requirements.txt
 ```
 
@@ -136,7 +136,26 @@ ollama pull phi             # Lightweight model (1.6GB)
 ollama list
 ```
 
-### Step 6: Tesseract OCR Setup
+### Step 6: ChromaDB Setup
+
+#### Initialize ChromaDB with Sample Data
+```bash
+# This creates training programs and job opportunities collections
+python scripts/setup_chromadb_data.py
+```
+
+#### Verify ChromaDB Installation
+```bash
+# Test ChromaDB functionality
+python -c "
+import chromadb
+client = chromadb.PersistentClient(path='data/chroma')
+collections = client.list_collections()
+print(f'ChromaDB collections: {[c.name for c in collections]}')
+"
+```
+
+### Step 7: Tesseract OCR Setup
 
 #### Automated Installation
 ```bash
@@ -154,7 +173,7 @@ sudo apt-get install tesseract-ocr
 # Windows: Download from GitHub releases
 ```
 
-### Step 7: Frontend Setup
+### Step 8: Frontend Setup
 
 ```bash
 cd src/frontend
@@ -162,7 +181,7 @@ npm install
 cd ../..
 ```
 
-### Step 8: Configuration
+### Step 9: Configuration
 
 #### Create Environment File
 ```bash
@@ -188,6 +207,9 @@ OLLAMA_BASE_URL=http://localhost:11434
 LLM_MODEL=llama2
 TESSERACT_PATH=/usr/bin/tesseract
 
+# ChromaDB Configuration
+CHROMADB_PERSIST_DIRECTORY=data/chroma
+
 # Security
 SECRET_KEY=your-secret-key-here
 ```
@@ -197,25 +219,31 @@ SECRET_KEY=your-secret-key-here
 python scripts/generate_ai_config.py
 ```
 
-### Step 9: Train ML Models
+### Step 10: Train ML Models
 
 ```bash
-python scripts/train_ml_models.py
+# Train eligibility and support amount models
+python scripts/train_models.py
 ```
 
-### Step 10: Test Installation
+### Step 11: System Verification
 
+#### Test All Components
 ```bash
-# Test all components
-python scripts/test_installation.py
+# Test database connection
+python -c "from src.models.database import test_connection; test_connection()"
 
-# Test individual components
-python scripts/test_database.py
-python scripts/test_ollama.py
-python scripts/test_tesseract.py
+# Test Ollama connection
+python -c "from src.services.llm_service import test_llm; test_llm()"
+
+# Test ChromaDB
+python test_chromadb_integration.py
+
+# Test Tesseract
+python -c "from src.data.document_processor import test_ocr; test_ocr()"
 ```
 
-## 🏃‍♂️ Running the Application
+## 🏃‍♂️ Running the System
 
 ### Option 1: Quick Start (Recommended)
 ```bash
@@ -227,7 +255,7 @@ python start_system.py
 # Terminal 1: Start API Server
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Terminal 2: Start Frontend
+# Terminal 2: Start Frontend (in new terminal)
 cd src/frontend && npm start
 ```
 
@@ -236,125 +264,44 @@ cd src/frontend && npm start
 - **API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 
-## 🔧 Advanced Configuration
+## 🧪 Testing the Installation
 
-### Local LLM Configuration
-
-#### Model Selection
-Edit `ai_config.json` to choose different models:
-```json
-{
-  "llm": {
-    "provider": "ollama",
-    "models": {
-      "conversation": "llama2",
-      "data_extraction": "codellama",
-      "reasoning": "mistral",
-      "fallback": "phi"
-    },
-    "base_url": "http://localhost:11434"
-  }
-}
-```
-
-#### Performance Tuning
-```json
-{
-  "llm": {
-    "generation_config": {
-      "temperature": 0.7,
-      "max_tokens": 2048,
-      "top_p": 0.9,
-      "frequency_penalty": 0.0
-    },
-    "timeout_seconds": 180,
-    "retry_attempts": 3
-  }
-}
-```
-
-### Database Configuration
-
-#### Connection Pooling
-```python
-# In database configuration
-SQLALCHEMY_DATABASE_URL = "postgresql://user:pass@localhost/db"
-SQLALCHEMY_ENGINE_OPTIONS = {
-    "pool_size": 10,
-    "max_overflow": 20,
-    "pool_pre_ping": True,
-    "pool_recycle": 300
-}
-```
-
-### OCR Configuration
-
-#### Tesseract Settings
-```json
-{
-  "ocr": {
-    "engine": "tesseract",
-    "config": "--psm 6 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
-    "confidence_threshold": 60,
-    "preprocessing": {
-      "resize_factor": 2.0,
-      "denoise": true,
-      "deskew": true
-    }
-  }
-}
-```
-
-## 🧪 Testing and Validation
-
-### Run Complete Test Suite
+### Basic Functionality Test
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific test categories
-python -m pytest tests/test_agents.py -v
-python -m pytest tests/test_workflow.py -v
-python -m pytest tests/test_database.py -v
+# Test conversation endpoint
+curl -X POST http://localhost:8000/conversation/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello", "conversation_state": {}, "conversation_history": []}'
 ```
 
-### Test Individual Components
+### ChromaDB Integration Test
 ```bash
-# Test conversation flow
-python tests/test_conversation_flow.py
-
-# Test document processing
-python tests/test_document_processing.py
-
-# Test ML models
-python tests/test_ml_models.py
-
-# Test database operations
-python tests/test_database_operations.py
+# Run comprehensive ChromaDB test
+python test_chromadb_integration.py
 ```
 
-### Load Testing
+### Document Upload Test
 ```bash
-# Test API performance
-python tests/load_test_api.py
-
-# Test concurrent users
-python tests/test_concurrent_users.py
+# Test document processing (with a sample image)
+curl -X POST http://localhost:8000/conversation/upload-document \
+  -F "file=@sample_document.jpg" \
+  -F "file_type=emirates_id" \
+  -F "conversation_state={}"
 ```
 
-## 🚨 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues and Solutions
 
 #### 1. Ollama Connection Error
 ```bash
 # Check if Ollama is running
-curl http://localhost:11434/api/tags
+ps aux | grep ollama
 
-# If not running, start it
+# Start Ollama if not running
 ollama serve
 
-# Check available models
+# Test model availability
 ollama list
 ```
 
@@ -362,158 +309,139 @@ ollama list
 ```bash
 # Check PostgreSQL status
 sudo systemctl status postgresql  # Linux
-brew services list | grep postgres  # macOS
+brew services list | grep postgresql  # macOS
 
-# Test connection
-psql -h localhost -U username -d social_support_db
+# Create database if missing
+createdb social_support_db
 ```
 
-#### 3. Tesseract Not Found
+#### 3. ChromaDB Issues
 ```bash
-# Check installation
-tesseract --version
+# Check ChromaDB directory
+ls -la data/chroma/
 
-# Check Python binding
-python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
-
-# Reinstall if needed
-python scripts/install_tesseract.py
+# Reinitialize ChromaDB
+rm -rf data/chroma/
+python scripts/setup_chromadb_data.py
 ```
 
-#### 4. Frontend Build Issues
+#### 4. Tesseract Not Found
+```bash
+# Find Tesseract installation
+which tesseract
+
+# Install if missing
+sudo apt-get install tesseract-ocr  # Ubuntu/Debian
+brew install tesseract              # macOS
+```
+
+#### 5. Frontend Build Issues
 ```bash
 cd src/frontend
 rm -rf node_modules package-lock.json
-npm cache clean --force
 npm install
+npm start
 ```
 
-#### 5. Python Import Errors
+#### 6. Python Package Issues
 ```bash
 # Reinstall requirements
-pip install --upgrade -r requirements.txt
-
-# Check virtual environment
-which python
-pip list
-```
-
-#### 6. Model Loading Issues
-```bash
-# Check model files
-ls -la src/models/
-
-# Retrain models if needed
-python scripts/train_ml_models.py --force
+pip install --upgrade pip
+pip install -r requirements.txt --force-reinstall
 ```
 
 ### Performance Optimization
 
-#### 1. LLM Performance
-- Use GPU acceleration if available
-- Adjust model parameters for speed vs quality
-- Implement response caching
-- Use smaller models for simple tasks
+#### For Better LLM Performance
+```bash
+# Use GPU acceleration (if available)
+export OLLAMA_GPU=1
 
-#### 2. Database Performance
-- Enable connection pooling
-- Add database indexes
-- Optimize queries
-- Use read replicas for scaling
+# Increase model context size
+export OLLAMA_NUM_CTX=4096
+```
 
-#### 3. Document Processing
-- Implement parallel processing
-- Cache OCR results
-- Optimize image preprocessing
-- Use async processing for large files
+#### For Better ChromaDB Performance
+```bash
+# Increase ChromaDB cache size
+export CHROMA_CACHE_SIZE=1000000
+```
 
-## 📊 Monitoring and Maintenance
+## 📊 System Monitoring
 
 ### Log Files
-- **API Logs**: `logs/api.log`
-- **Workflow Logs**: `logs/workflow.log`
-- **Database Logs**: `logs/database.log`
-- **ML Model Logs**: `logs/ml_models.log`
+- **Application Logs**: `logs/app.log`
+- **API Logs**: Check terminal output when running uvicorn
+- **Frontend Logs**: Check browser console
 
 ### Health Checks
 ```bash
-# Check system health
+# API health check
 curl http://localhost:8000/health
 
-# Check component status
-python scripts/health_check.py
+# Database health check
+python -c "from src.models.database import test_connection; test_connection()"
 ```
 
-### Backup and Recovery
+## 🔄 Updates and Maintenance
+
+### Updating Models
 ```bash
-# Backup database
-pg_dump social_support_db > backup_$(date +%Y%m%d).sql
-
-# Backup ML models
-tar -czf models_backup_$(date +%Y%m%d).tar.gz src/models/
-
-# Backup configuration
-tar -czf config_backup_$(date +%Y%m%d).tar.gz *.json *.env
-```
-
-## 🔄 Updates and Upgrades
-
-### Update Dependencies
-```bash
-# Update Python packages
-pip install --upgrade -r requirements.txt
-
-# Update Node.js packages
-cd src/frontend && npm update
-
 # Update Ollama models
 ollama pull llama2
+ollama pull mistral
+ollama pull phi
 ollama pull codellama
 ```
 
-### System Updates
+### Updating ChromaDB Data
 ```bash
-# Pull latest code
-git pull origin main
-
-# Run migration scripts
-python scripts/migrate_database.py
-python scripts/update_ml_models.py
-
-# Restart services
-python start_system.py
+# Add new training programs or job opportunities
+python scripts/setup_chromadb_data.py --update
 ```
 
-## 📞 Support and Documentation
+### Database Maintenance
+```bash
+# Backup database
+pg_dump social_support_db > backup.sql
 
-### Getting Help
-- Check the troubleshooting section above
-- Review log files for error details
-- Run diagnostic scripts: `python scripts/diagnose_issues.py`
-- Check system requirements and dependencies
+# Restore database
+psql social_support_db < backup.sql
+```
 
-### Additional Resources
-- **API Documentation**: http://localhost:8000/docs
-- **Database Schema**: `docs/database_schema.md`
-- **Architecture Guide**: `SOLUTION_SUMMARY.md`
-- **Development Guide**: `docs/development.md`
+## 🚀 Production Deployment
 
----
+### Docker Deployment (Recommended)
+```bash
+# Build Docker image
+docker build -t social-support-ai .
 
-## ✅ Installation Checklist
+# Run with Docker Compose
+docker-compose up -d
+```
 
-- [ ] System dependencies installed (Python, Node.js, PostgreSQL, Tesseract)
-- [ ] Repository cloned and virtual environment created
-- [ ] Python dependencies installed from requirements.txt
-- [ ] Database created and schema initialized
-- [ ] Ollama installed and models downloaded
-- [ ] Tesseract OCR installed and tested
-- [ ] Frontend dependencies installed
-- [ ] Environment variables configured
-- [ ] ML models trained
-- [ ] Installation tested successfully
-- [ ] Application running and accessible
+### Environment-Specific Configuration
+- **Development**: Use `.env.development`
+- **Staging**: Use `.env.staging`
+- **Production**: Use `.env.production`
 
-**Estimated Total Installation Time**: 30-60 minutes (depending on internet speed for model downloads)
+## 📞 Support
 
-**Total Disk Space Required**: ~15-20GB (including models and dependencies) 
+If you encounter issues during installation:
+
+1. Check the troubleshooting section above
+2. Review log files for error messages
+3. Ensure all system requirements are met
+4. Verify network connectivity for model downloads
+
+## 🎯 Next Steps
+
+After successful installation:
+
+1. **Test the System**: Run through a complete application flow
+2. **Customize Data**: Add your own training programs and job opportunities to ChromaDB
+3. **Configure Models**: Adjust AI model parameters in `ai_config.json`
+4. **Monitor Performance**: Set up logging and monitoring for production use
+5. **Scale as Needed**: Consider horizontal scaling for high-traffic scenarios
+
+The system is now ready for use with full AI-powered conversation flow, document processing, eligibility assessment, and personalized economic enablement recommendations! 

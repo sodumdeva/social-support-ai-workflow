@@ -117,10 +117,15 @@ def create_conversation_workflow():
     
     workflow.add_conditional_edges(
         "process_documents",
-        after_document_processing,
+        determine_next_action,
         {
+            "process_documents": "process_documents",
+            "validate_info": "validate_information",
+            "assess_eligibility": "assess_eligibility",
             "continue_conversation": "handle_user_message",
-            "validate_info": "validate_information"
+            "completion_chat": "handle_completion_chat",
+            "finalize": "finalize_application",
+            "waiting": END
         }
     )
     
@@ -307,10 +312,11 @@ async def handle_user_message(state: ConversationState) -> ConversationState:
                 # We have unprocessed documents - trigger document processing
                 state["processing_status"] = "documents_need_processing"
                 logger.info(f"Found {uploaded_docs - processed_docs} unprocessed documents, will trigger processing")
-            elif has_minimum_required_data(state["collected_data"]):
-                state["processing_status"] = "ready_for_validation"
             else:
+                # CRITICAL FIX: In document collection, wait for user to decide whether to upload documents or proceed
+                # Don't automatically proceed to validation just because we have minimum data
                 state["processing_status"] = "waiting_for_input"
+                logger.info("In document collection, waiting for user decision to upload documents or proceed")
         elif state["current_step"] == ConversationStep.ELIGIBILITY_PROCESSING:
             # CRITICAL FIX: Handle eligibility processing step
             uploaded_docs = len(state.get("uploaded_documents", []))
@@ -1494,16 +1500,25 @@ async def generate_recommendations(state: ConversationState) -> ConversationStat
     """Generate economic enablement recommendations"""
     
     try:
-        logger.info("Generating economic enablement recommendations")
+        logger.info("🎯 Generating economic enablement recommendations")
         
-        # Initialize conversation agent for LLM-powered recommendations
+        # Create conversation agent for LLM recommendations
         conversation_agent = ConversationAgent()
+        
+        # Verify the agent has the required method
+        if not hasattr(conversation_agent, '_generate_llm_economic_recommendations'):
+            logger.error("❌ ConversationAgent missing _generate_llm_economic_recommendations method")
+            raise AttributeError("ConversationAgent missing _generate_llm_economic_recommendations method")
+        
+        logger.info(f"🔄 Calling LLM recommendations with data: {len(state.get('collected_data', {}))} fields")
         
         # Generate recommendations using the new LLM method
         recommendations_result = await conversation_agent._generate_llm_economic_recommendations(
             state["collected_data"], 
             state["eligibility_result"]
         )
+        
+        logger.info(f"📝 LLM recommendations result status: {recommendations_result.get('status')}")
         
         if recommendations_result.get("status") == "success":
             # Add recommendations to eligibility result
@@ -1513,9 +1528,10 @@ async def generate_recommendations(state: ConversationState) -> ConversationStat
             state["eligibility_result"]["economic_enablement"]["llm_generated"] = True
             state["eligibility_result"]["economic_enablement"]["recommendations_text"] = recommendations_result["response"]
             
-            logger.info("LLM-powered recommendations generated successfully")
+            logger.info("✅ LLM-powered recommendations generated successfully")
         else:
-            logger.warning("LLM recommendations failed, using fallback")
+            error_msg = recommendations_result.get("error", "Unknown LLM error")
+            logger.warning(f"⚠️ LLM recommendations failed: {error_msg}")
             # Fallback to basic recommendations
             state["eligibility_result"]["economic_enablement"] = {
                 "summary": "Basic economic enablement recommendations based on your profile.",
@@ -1523,7 +1539,9 @@ async def generate_recommendations(state: ConversationState) -> ConversationStat
                     "Explore skills development programs",
                     "Consider career advancement opportunities", 
                     "Look into financial literacy resources"
-                ]
+                ],
+                "fallback_used": True,
+                "llm_error": error_msg
             }
         
         state["processing_status"] = "recommendations_generated"
@@ -1536,11 +1554,32 @@ async def generate_recommendations(state: ConversationState) -> ConversationStat
             "status": "completed"
         })
         
-    except Exception as e:
-        error_msg = f"Error generating recommendations: {str(e)}"
-        logger.error(error_msg)
+    except AttributeError as e:
+        error_msg = f"AttributeError generating recommendations: {str(e)}"
+        logger.error(f"❌ {error_msg}")
         state["error_messages"].append(error_msg)
         state["processing_status"] = "recommendation_error"
+        
+        # Add fallback recommendations
+        state["eligibility_result"]["economic_enablement"] = {
+            "summary": "Basic recommendations due to system error.",
+            "recommendations": ["Contact support for personalized guidance"],
+            "error": error_msg
+        }
+        
+    except Exception as e:
+        error_msg = f"Error generating recommendations: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"🔍 Error type: {type(e).__name__}")
+        state["error_messages"].append(error_msg)
+        state["processing_status"] = "recommendation_error"
+        
+        # Add fallback recommendations
+        state["eligibility_result"]["economic_enablement"] = {
+            "summary": "Basic recommendations due to system error.",
+            "recommendations": ["Contact support for personalized guidance"],
+            "error": error_msg
+        }
     
     return state
 
@@ -1630,8 +1669,38 @@ async def finalize_application(state: ConversationState) -> ConversationState:
                 "conversation_history": state.get("messages", [])
             }
             
-            # Create application in database
-            db_application = DatabaseManager.create_application(db, application_data)
+            # Check if application with this Emirates ID already exists
+            emirates_id = collected_data.get("emirates_id")
+            existing_application = None
+            if emirates_id:
+                existing_application = DatabaseManager.get_application_by_emirates_id(db, emirates_id)
+            
+            # TESTING MODE: For testing, create new applications instead of updating
+            # This can be controlled by environment variable or configuration
+            force_new_application = os.getenv("FORCE_NEW_APPLICATION", "false").lower() == "true"
+            
+            if existing_application and not force_new_application:
+                # Update existing application instead of creating new one
+                logger.info(f"Updating existing application for Emirates ID: {emirates_id}")
+                
+                # Update the existing application with new data
+                for key, value in application_data.items():
+                    if hasattr(existing_application, key) and key not in ['id', 'application_id', 'created_at', 'reference_number']:
+                        setattr(existing_application, key, value)
+                
+                existing_application.updated_at = datetime.utcnow()
+                existing_application.updated_by = "AI_WORKFLOW"
+                
+                db.commit()
+                db.refresh(existing_application)
+                
+                db_application = existing_application
+                logger.info(f"✅ Application updated in database: {db_application.application_id}")
+            else:
+                # Create new application
+                logger.info(f"Creating new application for Emirates ID: {emirates_id}")
+                db_application = DatabaseManager.create_application(db, application_data)
+                logger.info(f"✅ Application created in database: {db_application.application_id}")
             
             # Store documents if any were uploaded
             uploaded_documents = state.get("uploaded_documents", [])
@@ -1723,12 +1792,12 @@ async def finalize_application(state: ConversationState) -> ConversationState:
                 if db_app:
                     final_response += f"\n\n📋 **Your Application References:**"
                     final_response += f"\n🔢 **Reference Number:** {db_app.reference_number} (Easy to remember!)"
-                    final_response += f"\n📱 **Quick Lookup:** Use your name + last 4 digits of phone ({db_app.phone_reference})"
+                    final_response += f"\n📱 **Quick Lookup:** Use your name + last 4 digits of phone ({db_app.phone_reference or 'Not provided'})"
                     final_response += f"\n🆔 **Full Application ID:** {state['application_id']}"
                     final_response += f"\n\n💡 **How to Check Status Later:**"
                     final_response += f"\n• Use Reference Number: {db_app.reference_number}"
-                    final_response += f"\n• Use your Emirates ID: {collected_data.get('emirates_id', 'N/A')}"
-                    final_response += f"\n• Use Name + Phone: {collected_data.get('name', 'N/A')} + {db_app.phone_reference}"
+                    final_response += f"\n• Use your Emirates ID: {db_app.emirates_id}"
+                    final_response += f"\n• Use Name + Phone: {db_app.full_name} + {db_app.phone_reference or 'Not provided'}"
                     final_response += f"\n\n📞 **Save this message** or take a screenshot for your records!"
                 else:
                     final_response += f"\n\n📋 Your application has been saved with ID: {state['application_id']}"
@@ -1740,6 +1809,9 @@ async def finalize_application(state: ConversationState) -> ConversationState:
             "content": final_response,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # CRITICAL FIX: Set last_agent_response so frontend gets the final message
+        state["last_agent_response"] = final_response
         
         state["processing_status"] = "completed"
         state["current_step"] = ConversationStep.COMPLETION
@@ -1946,64 +2018,15 @@ def should_continue_conversation(state: ConversationState) -> str:
 
 
 def determine_next_action(state: ConversationState) -> str:
-    """Determine next action based on conversation state"""
+    """Determine the next action based on current state"""
     
     current_step = state.get("current_step", "")
     processing_status = state.get("processing_status", "")
-    workflow_history = state.get("workflow_history", [])
-    
-    logger.debug(f"Determining next action. Step: {current_step}, Status: {processing_status}")
-    
-    # CRITICAL: Prevent infinite loops by checking workflow history
-    recent_steps = [entry.get("step", "") for entry in workflow_history[-10:]]  # Last 10 steps
-    if len(recent_steps) >= 5:
-        # Check for repeated patterns
-        if recent_steps[-1] == recent_steps[-2] == recent_steps[-3]:
-            logger.warning(f"Detected loop in workflow: {recent_steps[-3:]}, ending workflow")
-            return "waiting"
-    
-    # Handle waiting states - end workflow to prevent recursion
-    if processing_status in [
-        "waiting_for_input", 
-        "waiting_for_completion_input", 
-        "error",
-        "validation_error",
-        "eligibility_error",
-        "recommendation_error",
-        "completion_error",
-        "restarting"  # Add restarting to end workflow
-    ]:
-        logger.debug(f"Ending workflow due to status: {processing_status}")
-        return "waiting"
-    
-    # CRITICAL FIX: Route completed applications to finalize_application
-    if processing_status == "completed":
-        logger.debug("Application completed, routing to finalize_application")
-        return "finalize"
-    
-    # Check if we're in completion phase
-    if current_step == ConversationStep.COMPLETION or processing_status == "completion_chat":
-        return "completion_chat"
-    
-    # CRITICAL FIX: Handle DOCUMENT_COLLECTION step properly
-    if current_step == ConversationStep.DOCUMENT_COLLECTION:
-        # If we're in document collection step, continue conversation to let user upload or proceed
-        user_input = state.get("user_input")
-        if user_input:
-            logger.info("🔍 ROUTING: In DOCUMENT_COLLECTION step with user input, continuing conversation")
-            return "continue_conversation"
-        else:
-            logger.info("🔍 ROUTING: In DOCUMENT_COLLECTION step without user input, waiting")
-            return "waiting"
-    
-    # CRITICAL FIX: Always check for unprocessed documents first, regardless of other conditions
     uploaded_docs = len(state.get("uploaded_documents", []))
     processed_docs = len(state.get("processed_documents", []))
+    workflow_history = state.get("workflow_history", [])
     
-    # ENHANCED DEBUG: Show detailed document state
-    logger.info(f"🔍 DOCUMENT DEBUG: uploaded_documents array: {state.get('uploaded_documents', [])}")
-    logger.info(f"🔍 DOCUMENT DEBUG: processed_documents array: {state.get('processed_documents', [])}")
-    logger.debug(f"Document status: {uploaded_docs} uploaded, {processed_docs} processed")
+    logger.info(f"🔍 ROUTING DEBUG: current_step='{current_step}', processing_status='{processing_status}', uploaded={uploaded_docs}, processed={processed_docs}")
     
     # CRITICAL LOOP PREVENTION: Check workflow history to prevent infinite document processing
     recent_steps = [entry.get("step", "") for entry in workflow_history[-5:]]
@@ -2014,30 +2037,51 @@ def determine_next_action(state: ConversationState) -> str:
         logger.warning(f"🚨 LOOP PREVENTION: Detected repeated document processing ({document_processing_count}x) and validation ({validation_count}x), forcing progression to eligibility assessment")
         return "assess_eligibility"
     
+    # PRIORITY 1: Handle document processing flow
     if uploaded_docs > processed_docs or processing_status == "documents_need_processing":
         logger.info(f"🔍 DOCUMENT PROCESSING TRIGGERED: {uploaded_docs} uploaded > {processed_docs} processed OR status = {processing_status}")
-        logger.debug("Found unprocessed documents, routing to process_documents")
         return "process_documents"
-    else:
-        logger.info(f"🔍 NO DOCUMENT PROCESSING: {uploaded_docs} uploaded = {processed_docs} processed AND status != documents_need_processing")
     
-    # Handle validation flow - CRITICAL: Check this BEFORE checking for user input
+    # PRIORITY 2: Handle validation flow - CRITICAL FIX
     if processing_status == "ready_for_validation":
+        logger.info(f"🔍 ROUTING: Processing status is 'ready_for_validation', routing to validate_info")
         return "validate_info"
     elif processing_status == "validated":
         logger.info("🔍 ROUTING: Processing status is 'validated', routing to assess_eligibility")
         return "assess_eligibility"
     
-    # Check if we need to validate information
-    if current_step in [ConversationStep.DOCUMENT_COLLECTION, ConversationStep.ELIGIBILITY_PROCESSING]:
-        validation_results = state.get("validation_results")
-        if not validation_results:
-            return "validate_info"
-        elif validation_results.get("status") == "complete":
+    # PRIORITY 3: Check validation results
+    validation_results = state.get("validation_results", {})
+    if validation_results:
+        if validation_results.get("status") == "complete":
             logger.info("🔍 ROUTING: Validation complete, routing to assess_eligibility")
             return "assess_eligibility"
     
-    # Check if ready for eligibility assessment
+    # CRITICAL FIX: Handle DOCUMENT_COLLECTION step properly
+    # Don't automatically proceed to validation - wait for user decision
+    if current_step == ConversationStep.DOCUMENT_COLLECTION:
+        # Only proceed if user explicitly indicated they want to proceed (via processing_status)
+        if processing_status == "ready_for_assessment":
+            logger.info("🔍 ROUTING: User ready for assessment from document collection, routing to validate_info")
+            return "validate_info"
+        else:
+            # Stay in conversation to let user decide what to do
+            user_input = state.get("user_input")
+            if user_input:
+                logger.info("🔍 ROUTING: In document collection with user input, continuing conversation")
+                return "continue_conversation"
+            else:
+                logger.info("🔍 ROUTING: In document collection waiting for user input")
+                return "waiting"
+    
+    # PRIORITY 4: Handle other steps that need validation
+    elif current_step == ConversationStep.ELIGIBILITY_PROCESSING and has_minimum_required_data(state.get("collected_data", {})):
+        # If we have minimum data but no validation results, validate first
+        if not validation_results:
+            logger.info("🔍 ROUTING: Have minimum data but no validation results, routing to validate_info")
+            return "validate_info"
+    
+    # PRIORITY 5: Check if ready for eligibility assessment
     if current_step == ConversationStep.ELIGIBILITY_PROCESSING:
         if not state.get("eligibility_result"):
             logger.info("🔍 ROUTING: In eligibility_processing step without result, routing to assess_eligibility")
@@ -2045,21 +2089,15 @@ def determine_next_action(state: ConversationState) -> str:
         else:
             return "finalize"
     
-    # If we have user input to process, continue conversation
+    # PRIORITY 6: If we have user input to process, continue conversation
     user_input = state.get("user_input")
     if user_input:
+        logger.info(f"🔍 ROUTING: Have user input '{user_input[:50]}...', routing to continue_conversation")
         return "continue_conversation"
     
     # SAFETY: If no clear next action, end workflow to prevent infinite loops
-    logger.debug("No clear next action determined, ending workflow to prevent loops")
+    logger.info("🔍 ROUTING: No clear next action determined, ending workflow to prevent loops")
     return "waiting"
-
-
-def after_document_processing(state: ConversationState) -> str:
-    """Determine action after document processing"""
-    if has_minimum_required_data(state["collected_data"]):
-        return "validate_info"
-    return "continue_conversation"
 
 
 def after_validation(state: ConversationState) -> str:

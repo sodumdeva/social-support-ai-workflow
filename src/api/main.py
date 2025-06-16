@@ -42,6 +42,9 @@ from src.agents.eligibility_agent import EligibilityAssessmentAgent
 from src.workflows.langgraph_workflow import create_conversation_workflow, ConversationState
 from src.models.database import DatabaseManager
 
+# Import routers
+from src.api.job_training_endpoints import router as job_training_router
+
 # Pydantic models for API
 class ApplicationData(BaseModel):
     first_name: str
@@ -666,8 +669,24 @@ def convert_langgraph_state_to_frontend(langgraph_state: Dict) -> Dict:
         assistant_messages = [msg for msg in langgraph_state.get("messages", []) if msg["role"] == "assistant"]
         latest_message = assistant_messages[-1]["content"] if assistant_messages else ""
     
+    # CRITICAL FIX: If we still don't have a message but the application is completed,
+    # generate a completion message based on the final decision
+    if not latest_message and langgraph_state.get("processing_status") == "completed":
+        final_decision = langgraph_state.get("final_decision") or langgraph_state.get("eligibility_result")
+        if final_decision:
+            eligible = final_decision.get("eligible", False)
+            support_amount = final_decision.get("support_amount", 0)
+            
+            if eligible:
+                latest_message = f"🎉 Great news! Based on your information, you are eligible for social support. You qualify for {support_amount:,.0f} AED per month in financial assistance.\n\nYour application has been processed successfully and stored in our database. You will be contacted for final verification and to arrange support payments."
+            else:
+                reason = final_decision.get("reason", "Based on the current criteria, you don't qualify for direct financial support at this time.")
+                latest_message = f"I've completed the assessment of your application. {reason}\n\nHowever, I have economic enablement recommendations that can help improve your situation for future applications."
+            
+            logger.info(f"🎯 Generated completion message for frontend: {len(latest_message)} chars")
+    
     # Add debugging to track which response source is used
-    response_source = "last_agent_response" if langgraph_state.get("last_agent_response") else "messages_array"
+    response_source = "last_agent_response" if langgraph_state.get("last_agent_response") else "messages_array" if latest_message else "generated_completion"
     logger.info(f"🎯 Frontend conversion: Using response from '{response_source}', length: {len(latest_message)} chars")
     
     # Prepare state update for frontend
@@ -696,10 +715,13 @@ def convert_langgraph_state_to_frontend(langgraph_state: Dict) -> Dict:
     }
     
     if application_complete:
-        response["final_decision"] = langgraph_state.get("final_decision")
+        response["final_decision"] = langgraph_state.get("final_decision") or langgraph_state.get("eligibility_result")
     
     return response
 
+
+# Include routers
+app.include_router(job_training_router)
 
 if __name__ == "__main__":
     import uvicorn

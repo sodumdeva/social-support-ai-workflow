@@ -113,7 +113,7 @@ class LocalLLMService:
                 async with session.post(
                     f"{self.base_url}/api/generate",
                     json=request_data,
-                    timeout=aiohttp.ClientTimeout(total=180)
+                    timeout=aiohttp.ClientTimeout(total=300)
                 ) as response:
                     
                     if response.status == 200:

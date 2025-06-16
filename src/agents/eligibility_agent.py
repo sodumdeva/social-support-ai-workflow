@@ -11,6 +11,7 @@ Evaluates social support applications using:
 from typing import Dict, Any, List, Optional
 import json
 from datetime import datetime
+import asyncio
 
 from .base_agent import BaseAgent
 
@@ -29,10 +30,19 @@ try:
         sys.path.insert(0, src_dir)
     
     from models.ml_models import SocialSupportMLModels
+    from models.database import get_db_session, Application, MLPrediction
     ML_MODELS_AVAILABLE = True
 except ImportError as e:
     ML_MODELS_AVAILABLE = False
     print(f"Warning: ML models not available ({str(e)}), falling back to rule-based assessment")
+
+# Import vector store separately (always needed for economic enablement)
+try:
+    from src.services.vector_store import get_vector_store
+    VECTOR_STORE_AVAILABLE = True
+except ImportError as e:
+    VECTOR_STORE_AVAILABLE = False
+    print(f"Warning: Vector store not available ({str(e)}), using fallback recommendations")
 
 
 class EligibilityAssessmentAgent(BaseAgent):
@@ -226,10 +236,19 @@ class EligibilityAssessmentAgent(BaseAgent):
         if not hard_constraints["passed"]:
             is_eligible = False
         
+        # Calculate support amount if eligible
+        support_amount = 0
+        if is_eligible:
+            support_calculation = await self._calculate_support_amount_rules(
+                application_data, extracted_documents, {"eligible": is_eligible}
+            )
+            support_amount = support_calculation.get("monthly_support_amount", 0)
+        
         return {
             "eligible": is_eligible,
             "total_score": round(total_score, 3),
             "minimum_required_score": self.thresholds["minimum_score"],
+            "support_amount": support_amount,  # Add support amount to result
             "component_scores": {
                 "financial_need": financial_assessment,
                 "family_composition": family_assessment,
@@ -633,11 +652,67 @@ class EligibilityAssessmentAgent(BaseAgent):
         extracted_documents: Dict[str, Any],
         assessment_result: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Generate comprehensive economic enablement recommendations based on assessment"""
+        """Generate ChromaDB-enhanced economic enablement recommendations"""
         
+        try:
+            logger.info("🔍 Generating ChromaDB-enhanced economic enablement recommendations")
+            
+            # Import ConversationAgent to use its ChromaDB integration
+            from .conversation_agent import ConversationAgent
+            conversation_agent = ConversationAgent()
+            
+            # Create eligibility result format expected by ConversationAgent
+            eligibility_result = {
+                "eligible": assessment_result.get("eligible", False),
+                "support_amount": assessment_result.get("support_amount", 0),
+                "reason": assessment_result.get("reason", "Assessment completed")
+            }
+            
+            # Use ConversationAgent's ChromaDB-enhanced recommendation generation
+            llm_recommendations = await conversation_agent._generate_llm_economic_recommendations(
+                application_data, eligibility_result
+            )
+            
+            if llm_recommendations.get("status") == "success":
+                logger.info("✅ Successfully generated ChromaDB-enhanced recommendations")
+                
+                # Extract the formatted response and convert to structured format
+                recommendations_text = llm_recommendations.get("response", "")
+                
+                # Create structured response with both text and metadata
+                return {
+                    "recommendations_text": recommendations_text,  # Full formatted text for display
+                    "summary": "Personalized recommendations based on available training programs and job opportunities",
+                    "chromadb_integration": {
+                        "status": "success",
+                        "training_programs_found": llm_recommendations.get("training_programs_found", 0),
+                        "job_opportunities_found": llm_recommendations.get("job_opportunities_found", 0),
+                        "source": llm_recommendations.get("source", "chromadb_enhanced_llm")
+                    },
+                    "generated_by": "chromadb_enhanced_system"
+                }
+            else:
+                logger.warning("ChromaDB-enhanced recommendations failed, using fallback")
+                return await self._generate_fallback_recommendations(application_data, assessment_result)
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating ChromaDB-enhanced recommendations: {str(e)}")
+            # Fallback to basic recommendations if anything fails
+            return await self._generate_fallback_recommendations(application_data, assessment_result)
+    
+    async def _generate_fallback_recommendations(
+        self, 
+        application_data: Dict[str, Any], 
+        assessment_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate fallback recommendations if ChromaDB integration fails"""
+        
+        logger.warning("Using fallback recommendations due to ChromaDB integration failure")
+        
+        # Basic fallback recommendations (original static ones)
         recommendations = []
         
-        # Job Training and Upskilling Recommendations
+        # Basic training programs
         training_programs = [
            {
                "name": "Digital Skills Training Program",
@@ -645,7 +720,8 @@ class EligibilityAssessmentAgent(BaseAgent):
                "description": "Learn essential computer skills, Microsoft Office, and basic digital literacy",
                "provider": "UAE Digital Skills Academy",
                "cost": "Free for eligible applicants",
-               "contact": "800-SKILLS"
+               "contact": "800-SKILLS",
+               "source": "fallback"
            },
            {
                "name": "Vocational Training Certificate",
@@ -653,45 +729,69 @@ class EligibilityAssessmentAgent(BaseAgent):
                "description": "Hands-on training in trades like plumbing, electrical work, or automotive repair",
                "provider": "Technical Education Institute",
                "cost": "Subsidized for low-income families",
-               "contact": "04-123-4567"
-           },
-           {
-               "name": "English Language Course",
-               "duration": "4 months",
-               "description": "Improve English communication skills for better job opportunities",
-               "provider": "Community Learning Center",
-               "cost": "Free",
-               "contact": "02-987-6543"
+               "contact": "04-123-4567",
+               "source": "fallback"
            }
         ]
         
-        # Job Matching Opportunities
+        # Basic job opportunities
         job_opportunities = [
            {
                "title": "Customer Service Representative",
                "company": "Various Companies",
                "salary_range": "3000-4500 AED",
                "requirements": "Basic English, computer skills",
-               "contact": "UAE Employment Center - 800-JOBS"
+               "contact": "UAE Employment Center - 800-JOBS",
+               "source": "fallback"
            },
            {
                "title": "Retail Sales Associate", 
                "company": "Shopping Centers",
                "salary_range": "2500-3500 AED",
                "requirements": "Customer service skills, flexible schedule",
-               "contact": "Retail Jobs Portal - jobs.uae.gov"
-           },
-           {
-               "title": "Food Service Worker",
-               "company": "Restaurants & Hotels",
-               "salary_range": "2200-3200 AED",
-               "requirements": "Food safety certificate (provided)",
-               "contact": "Hospitality Jobs Center - 04-555-0123"
+               "contact": "Retail Jobs Portal - jobs.uae.gov",
+               "source": "fallback"
            }
         ]
         
-        # Career Counseling Services
-        counseling_services = [
+        if assessment_result["eligible"]:
+            recommendations.extend([
+               "✅ **Immediate Support**: You qualify for monthly financial assistance.",
+               "📚 **Skill Development**: Enroll in training programs to improve job prospects.",
+               "💼 **Job Search**: Register with employment services for job matching.",
+               "💰 **Financial Planning**: Attend financial literacy workshops.",
+               "🎯 **Career Counseling**: Get professional guidance for career development."
+            ])
+            
+            summary = "🎉 **Good news!** You qualify for social support. Use this opportunity to build skills and work toward economic independence."
+        else:
+            recommendations.extend([
+               "📚 **Skill Enhancement**: Focus on developing marketable skills through training programs.",
+               "💼 **Job Search Assistance**: Use employment services to find better opportunities.", 
+               "🎯 **Career Counseling**: Get professional guidance to improve employment prospects.",
+               "💰 **Financial Planning**: Learn budgeting and financial management skills.",
+               "🔄 **Reapply Later**: Consider reapplying after improving your situation."
+            ])
+            
+            summary = "While you don't qualify for direct support currently, there are resources available to help improve your situation."
+        
+        return {
+            "recommendations": recommendations,
+            "training_programs": training_programs,
+            "job_opportunities": job_opportunities, 
+            "counseling_services": self._get_default_counseling_services(),
+            "financial_programs": self._get_default_financial_programs(),
+            "summary": summary,
+            "chromadb_integration": {
+                "status": "failed",
+                "fallback_used": True
+            },
+            "generated_by": "fallback_system"
+        }
+    
+    def _get_default_counseling_services(self) -> List[Dict[str, Any]]:
+        """Get default counseling services"""
+        return [
            {
                "service": "Career Assessment & Planning",
                "provider": "UAE Career Development Center",
@@ -705,18 +805,12 @@ class EligibilityAssessmentAgent(BaseAgent):
                "description": "Learn to create professional resumes and cover letters",
                "cost": "Free",
                "contact": "career.support@uae.gov"
-           },
-           {
-               "service": "Interview Skills Training",
-               "provider": "Professional Development Institute",
-               "description": "Practice interview techniques and build confidence",
-               "cost": "Free for social support recipients",
-               "contact": "04-321-9876"
            }
         ]
-        
-        # Financial Literacy Programs
-        financial_programs = [
+    
+    def _get_default_financial_programs(self) -> List[Dict[str, Any]]:
+        """Get default financial programs"""
+        return [
            {
                "program": "Personal Finance Management",
                "provider": "UAE Financial Literacy Center",
@@ -734,67 +828,6 @@ class EligibilityAssessmentAgent(BaseAgent):
                "contact": "800-BUSINESS"
            }
         ]
-        
-        # Generate personalized recommendations based on assessment
-        if assessment_result["eligible"]:
-            recommendations.extend([
-               "✅ **Immediate Support**: You qualify for monthly financial assistance. Use this time to focus on skill development.",
-               "📚 **Skill Development**: Enroll in digital skills or vocational training to improve job prospects.",
-               "💼 **Job Search**: Register with UAE Employment Center for job matching services.",
-               "💰 **Financial Planning**: Attend financial literacy workshops to maximize your support benefits.",
-               "🎯 **Career Counseling**: Get professional guidance to identify the best career path for your situation."
-            ])
-            
-            summary = f"""🎉 **Good news!** You qualify for social support. Here's your path to economic independence:
-
-**Immediate Next Steps:**
-1. **Financial Support**: You'll receive monthly assistance to cover basic needs
-2. **Skill Building**: Use this stability to invest in your future through training programs
-3. **Job Preparation**: Work with career counselors to prepare for employment
-4. **Long-term Planning**: Develop financial literacy skills for sustainable independence
-
-**Available Programs:**
-- **Training**: {len(training_programs)} programs available
-- **Job Opportunities**: {len(job_opportunities)} types of positions
-- **Support Services**: {len(counseling_services)} counseling services
-- **Financial Education**: {len(financial_programs)} programs
-
-Remember: This support is designed to help you become self-sufficient. Take advantage of all available resources!"""
-        
-        else:
-            recommendations.extend([
-               "📚 **Skill Enhancement**: Focus on developing marketable skills through free training programs.",
-               "💼 **Job Search Assistance**: Use employment services to find better-paying opportunities.", 
-               "🎯 **Career Counseling**: Get professional guidance to improve your employment prospects.",
-               "💰 **Financial Planning**: Learn budgeting and financial management skills.",
-               "🔄 **Reapply Later**: Consider reapplying after improving your employment situation."
-            ])
-            
-            summary = f"""While you don't qualify for direct financial support at this time, there are many resources to help improve your situation:
-
-**Focus Areas:**
-1. **Skill Development**: Enhance your qualifications through free training programs
-2. **Job Search**: Access employment services for better opportunities
-3. **Financial Management**: Learn to optimize your current income
-4. **Future Planning**: Work toward qualifying for support in the future
-
-**Available Resources:**
-- **Free Training**: {len(training_programs)} programs to boost your skills
-- **Job Assistance**: {len(job_opportunities)} types of opportunities available
-- **Career Support**: {len(counseling_services)} professional services
-- **Financial Education**: {len(financial_programs)} programs for money management
-
-Don't give up! These resources can help you build a stronger financial foundation."""
-        
-        return {
-            "recommendations": recommendations,
-            "training_programs": training_programs,
-            "job_opportunities": job_opportunities, 
-            "counseling_services": counseling_services,
-            "financial_programs": financial_programs,
-            "summary": summary,
-            "generated_by": "comprehensive_system"
-        }
     
     async def _perform_data_validation(
         self, 

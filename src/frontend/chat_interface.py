@@ -36,6 +36,23 @@ def show_chat_interface():
             }
         ]
     
+    # CRITICAL: Check if application is completed and show status
+    application_completed = st.session_state.conversation_state.get("application_complete", False)
+    processing_status = st.session_state.conversation_state.get("processing_status", "")
+    
+    if application_completed or processing_status == "completed":
+        st.success("🎉 **Application Completed Successfully!**")
+        
+        # Show the last completion message if available
+        if hasattr(st.session_state, 'last_response') and st.session_state.last_response:
+            st.info("📋 **Final Assessment:**")
+            st.markdown(st.session_state.last_response)
+        
+        # Add restart option
+        if st.button("🔄 Start New Application", key="restart_after_completion"):
+            restart_conversation()
+            st.rerun()
+    
     # Display chat messages
     for message in st.session_state.conversation_messages:
         with st.chat_message(message["role"]):
@@ -541,14 +558,20 @@ def handle_user_input(prompt: str):
     
     # Process with conversation agent
     try:
+        print(f"🔍 FRONTEND: Starting to process user input: '{prompt}'")
+        
         response = process_chat_message(
             prompt, 
             st.session_state.conversation_messages,
             st.session_state.conversation_state
         )
         
+        print(f"🔍 FRONTEND: Received response type: {type(response)}")
+        print(f"🔍 FRONTEND: Response keys: {list(response.keys()) if isinstance(response, dict) else 'Not a dict'}")
+        
         # Ensure response is not None
         if response is None:
+            print("🔍 FRONTEND: Response is None, using fallback")
             response = {
                 "message": "I'm having trouble processing your request right now. Could you please try again?",
                 "state_update": {}
@@ -560,6 +583,7 @@ def handle_user_input(prompt: str):
             state_update.get("collected_data") == {} and
             "start" in prompt.lower() and "new" in prompt.lower()):
             
+            print("🔍 FRONTEND: Detected restart scenario")
             # This is a restart - reset frontend state completely
             st.session_state.conversation_state = {
                 "current_step": "name_collection",
@@ -583,27 +607,91 @@ def handle_user_input(prompt: str):
             st.rerun()
             return
         
+        # CRITICAL FIX: Handle application completion properly
+        application_complete = response.get("application_complete", False)
+        processing_status = state_update.get("processing_status", "")
+        current_step = state_update.get("current_step", "")
+        
+        print(f"🔍 FRONTEND: Application complete: {application_complete}")
+        print(f"🔍 FRONTEND: Processing status: {processing_status}")
+        print(f"🔍 FRONTEND: Current step: {current_step}")
+        
+        # ENHANCED: Check for completion in multiple ways
+        is_completion = (
+            application_complete or 
+            processing_status == "completed" or 
+            processing_status == "completion_chat" or
+            current_step == "completion" or
+            ("approved" in response.get("message", "").lower() and "AED" in response.get("message", ""))
+        )
+        
+        if is_completion:
+            print("🔍 FRONTEND: Handling application completion")
+            
+            # Add the completion message FIRST
+            completion_message = response.get("message", "")
+            if completion_message:
+                print(f"🔍 FRONTEND: Adding completion message ({len(completion_message)} chars)")
+                st.session_state.conversation_messages.append({
+                    "role": "assistant",
+                    "content": completion_message
+                })
+                
+                # CRITICAL: Force immediate display by updating session state
+                st.session_state.last_response = completion_message
+                st.session_state.application_completed = True
+                
+            else:
+                print("🔍 FRONTEND: WARNING - No completion message in response")
+            
+            # Update conversation state with completion status
+            print("🔍 FRONTEND: Updating conversation state")
+            st.session_state.conversation_state.update(state_update)
+            st.session_state.conversation_state["application_complete"] = True
+            st.session_state.conversation_state["processing_status"] = "completed"
+            
+            # Show success message immediately
+            st.success("🎉 Application completed successfully!")
+            
+            print("🔍 FRONTEND: Calling st.rerun() for completion")
+            st.rerun()
+            return
+        
         # Add assistant response only if there is a message
         if response.get("message"):
+            print(f"🔍 FRONTEND: Adding regular assistant message ({len(response['message'])} chars)")
             st.session_state.conversation_messages.append({
                 "role": "assistant",
                 "content": response["message"]
             })
+        else:
+            print("🔍 FRONTEND: No message in response")
         
         # Update conversation state
+        print("🔍 FRONTEND: Updating conversation state with regular response")
         st.session_state.conversation_state.update(response.get("state_update", {}))
         
-        # Check if application is complete
+        # LEGACY: Check if application is complete (fallback)
         if response.get("application_complete"):
+            print("🔍 FRONTEND: Legacy application complete check triggered")
             st.session_state.conversation_state["application_complete"] = True
-            show_final_results(response.get("final_decision"))
+            try:
+                show_final_results(response.get("final_decision"))
+            except Exception as e:
+                print(f"🔍 FRONTEND: ERROR in legacy show_final_results: {str(e)}")
             
     except Exception as e:
+        print(f"🔍 FRONTEND: EXCEPTION in handle_user_input: {str(e)}")
+        print(f"🔍 FRONTEND: Exception type: {type(e).__name__}")
+        import traceback
+        print(f"🔍 FRONTEND: Traceback: {traceback.format_exc()}")
+        
         st.session_state.conversation_messages.append({
             "role": "assistant",
             "content": f"I apologize, I encountered an error: {str(e)}. Let me try to help you in a different way."
         })
     
+    print("🔍 FRONTEND: Calling final st.rerun()")
     st.rerun()
 
 def restart_conversation():
@@ -657,29 +745,51 @@ def process_chat_message(user_message: str, conversation_history: List[Dict], co
                         conversation_state.get("processing_status") == "completion_chat" or
                         conversation_state.get("eligibility_result") is not None)
         
-        # Use longer timeout for completion conversations with LLM
-        timeout_seconds = 120 if is_completion else 60  # 2 minutes for completion, 1 minute for others
+        # ENHANCED: Also check for document collection with "proceed" - this triggers full assessment
+        is_document_proceed = (current_step == "document_collection" and 
+                              "proceed" in user_message.lower())
+        
+        
+        timeout_seconds = 300   # 3 minutes for regular conversation
+        
+        # DEBUG: Log the request being sent
+        request_data = {
+            "message": user_message,
+            "conversation_history": conversation_history,
+            "conversation_state": conversation_state
+        }
+        print(f"🔍 FRONTEND DEBUG: Sending request - Step: {current_step}, Message: '{user_message}', Timeout: {timeout_seconds}s")
         
         response = requests.post(
             f"{API_BASE}/conversation/message",
-            json={
-                "message": user_message,
-                "conversation_history": conversation_history,
-                "conversation_state": conversation_state
-            },
+            json=request_data,
             timeout=timeout_seconds
         )
         
         if response.status_code == 200:
             result = response.json()
+            
+            # DEBUG: Log the response received
+            response_message = result.get("message", "")
+            state_update = result.get("state_update", {})
+            application_complete = result.get("application_complete", False)
+            
+            print(f"🔍 FRONTEND DEBUG: Received response - Status: {response.status_code}")
+            print(f"   Message length: {len(response_message)} chars")
+            print(f"   Application complete: {application_complete}")
+            print(f"   New step: {state_update.get('current_step', 'unknown')}")
+            print(f"   Processing status: {state_update.get('processing_status', 'unknown')}")
+            
             return result
         else:
+            print(f"🔍 FRONTEND DEBUG: API error - Status: {response.status_code}")
             return {
                 "message": "I'm having trouble processing your request right now. Could you please try again?",
                 "state_update": {}
             }
             
     except Exception as e:
+        print(f"🔍 FRONTEND DEBUG: Exception occurred - {str(e)}")
         # Fallback to rule-based responses if API is down
         return generate_fallback_response(user_message, conversation_state)
 
@@ -726,7 +836,7 @@ def process_document_upload(uploaded_file) -> str:
                 f"{API_BASE}/conversation/upload-document",
                 files=files,
                 data=data,
-                timeout=60
+                timeout=300
             )
         
         # Clean up temporary file

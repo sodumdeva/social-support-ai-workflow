@@ -428,7 +428,7 @@ class ConversationAgent(BaseAgent):
             return {
                 "message": "You can either:\n• Upload additional documents using the file upload area\n• Say 'proceed' to continue with the eligibility assessment using the information you've already provided\n\nWhat would you like to do?",
                 "state_update": {}
-            }
+            } 
     
     async def _proceed_to_eligibility_assessment(self, collected_data: Dict) -> Dict[str, Any]:
         """Proceed to eligibility assessment"""
@@ -658,142 +658,270 @@ What would you like to know more about?""",
         }
     
     async def _generate_llm_economic_recommendations(self, collected_data: Dict, eligibility_result: Dict) -> Dict[str, Any]:
-        """Generate personalized economic enablement recommendations using LLM"""
+        """Generate personalized economic enablement recommendations using ChromaDB + LLM"""
         
-        # Build concise user profile
-        employment_status = collected_data.get("employment_status", "unknown")
-        monthly_income = collected_data.get("monthly_income", 0)
-        family_size = collected_data.get("family_size", 1)
-        
-        # SIMPLIFIED system prompt for faster response
-        system_prompt = """You are a UAE economic advisor. Give exactly 3 brief recommendations in 30 words total. Be extremely concise. Format: 1. [recommendation] 2. [recommendation] 3. [recommendation]"""
-
-        # SIMPLIFIED user prompt
-        user_prompt = f"""Person: {employment_status}, {monthly_income} AED/month, {family_size} people.
-        
-3 brief income recommendations (30 words max):"""
-
         try:
-            # Call LLM with simplified prompts
+            # STEP 1: Create user profile for ChromaDB matching
+            user_profile = self._create_user_profile_for_chromadb(collected_data)
+            logger.info(f"🔍 Created user profile for ChromaDB: {user_profile}")
+            
+            # STEP 2: Fetch relevant data from ChromaDB
+            training_programs = []
+            job_opportunities = []
+            
+            try:
+                from src.services.vector_store import get_vector_store
+                vector_store = get_vector_store()
+                
+                # Get relevant training programs (top 5)
+                logger.info("📚 Fetching relevant training programs from ChromaDB...")
+                training_programs = await vector_store.get_relevant_training_programs(user_profile, n_results=5)
+                
+                # Get relevant job opportunities (top 5)
+                logger.info("💼 Fetching relevant job opportunities from ChromaDB...")
+                job_opportunities = await vector_store.get_relevant_job_opportunities(user_profile, n_results=5)
+                
+                logger.info(f"✅ ChromaDB Results: {len(training_programs)} training programs, {len(job_opportunities)} job opportunities")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ ChromaDB integration failed: {str(e)}, using fallback recommendations")
+                # Continue with LLM-only recommendations if ChromaDB fails
+            
+            # STEP 3: Build enhanced system prompt with ChromaDB context
+            employment_status = collected_data.get("employment_status", "unknown")
+            monthly_income = collected_data.get("monthly_income", 0)
+            family_size = collected_data.get("family_size", 1)
+            eligible = eligibility_result.get("eligible", False)
+            support_amount = eligibility_result.get("support_amount", 0)
+            
+            # Enhanced system prompt with ChromaDB context
+            system_prompt = f"""You are a UAE economic advisor providing personalized recommendations. 
+
+USER PROFILE:
+- Employment: {employment_status}
+- Monthly Income: {monthly_income} AED
+- Family Size: {family_size}
+- Support Status: {'APPROVED for ' + str(support_amount) + ' AED/month' if eligible else 'NOT APPROVED for direct support'}
+
+AVAILABLE TRAINING PROGRAMS:
+{self._format_training_programs_for_llm(training_programs)}
+
+AVAILABLE JOB OPPORTUNITIES:
+{self._format_job_opportunities_for_llm(job_opportunities)}
+
+Provide exactly 3 specific, actionable recommendations using the available programs and jobs above. Be concise but specific. Format as:
+1. [specific recommendation with program/job name]
+2. [specific recommendation with program/job name] 
+3. [specific recommendation with program/job name]
+
+Maximum 100 words total."""
+
+            # STEP 4: Build user prompt
+            user_prompt = f"""Based on my profile and the available programs/jobs, give me 3 specific recommendations to improve my economic situation:"""
+
+            # STEP 5: Call LLM with enhanced context
+            logger.info("🤖 Calling LLM with ChromaDB-enhanced context...")
             llm_result = await self.invoke_llm(user_prompt, system_prompt)
             
             if llm_result.get("status") == "success" and llm_result.get("response"):
-                # Format the LLM response simply
-                formatted_response = "## 🚀 Economic Enablement Recommendations\n\n"
+                # STEP 6: Format the enhanced response
+                formatted_response = "## 🚀 Personalized Economic Enablement Recommendations\n\n"
                 formatted_response += llm_result["response"]
+                
+                # Add contact information if available
+                if training_programs or job_opportunities:
+                    formatted_response += "\n\n## 📞 Contact Information\n"
+                    
+                    # Add training program contacts
+                    if training_programs:
+                        formatted_response += "\n**Training Programs:**\n"
+                        for program in training_programs[:3]:  # Top 3
+                            metadata = program.get("metadata", {})
+                            program_name = metadata.get("program_name", "Unknown Program")
+                            contact = metadata.get("contact", "Contact information not available")
+                            formatted_response += f"• {program_name}: {contact}\n"
+                    
+                    # Add job opportunity contacts
+                    if job_opportunities:
+                        formatted_response += "\n**Job Opportunities:**\n"
+                        for job in job_opportunities[:3]:  # Top 3
+                            metadata = job.get("metadata", {})
+                            job_title = metadata.get("job_title", "Unknown Position")
+                            contact = metadata.get("contact", "Contact information not available")
+                            formatted_response += f"• {job_title}: {contact}\n"
                 
                 return {
                     "status": "success",
                     "response": formatted_response,
-                    "source": "llm_generated"
+                    "source": "chromadb_enhanced_llm",
+                    "training_programs_found": len(training_programs),
+                    "job_opportunities_found": len(job_opportunities)
                 }
             else:
-                return {
-                    "status": "error",
-                    "error": llm_result.get("error", "LLM response failed"),
-                    "response": ""
-                }
+                # Fallback to ChromaDB-only recommendations if LLM fails
+                logger.warning("LLM failed, using ChromaDB-only recommendations")
+                return self._generate_chromadb_only_recommendations(training_programs, job_opportunities, collected_data)
                 
         except Exception as e:
-            logger.error(f"LLM recommendation generation failed: {str(e)}")
+            logger.error(f"Enhanced LLM recommendation generation failed: {str(e)}")
+            # Final fallback to basic recommendations
             return {
                 "status": "error",
                 "error": str(e),
-                "response": ""
+                "response": self._generate_fallback_economic_recommendations(
+                    collected_data.get("employment_status", "unknown"), 
+                    collected_data.get("monthly_income", 0)
+                )
             }
     
-    def _build_user_profile_for_llm(self, collected_data: Dict, eligibility_result: Dict) -> str:
-        """Build a comprehensive user profile string for LLM context"""
+    def _create_user_profile_for_chromadb(self, collected_data: Dict) -> Dict[str, Any]:
+        """Create user profile optimized for ChromaDB matching"""
         
-        profile_parts = []
-        
-        # Basic Demographics
-        if collected_data.get("name"):
-            profile_parts.append(f"Name: {collected_data['name']}")
-        
-        # Employment Information
         employment_status = collected_data.get("employment_status", "unknown")
-        profile_parts.append(f"Employment Status: {employment_status.replace('_', ' ').title()}")
-        
         monthly_income = collected_data.get("monthly_income", 0)
-        profile_parts.append(f"Monthly Income: {monthly_income:,.0f} AED")
-        
-        # Family Situation
         family_size = collected_data.get("family_size", 1)
-        profile_parts.append(f"Household Size: {family_size} people")
         
-        # Calculate per-person income
-        per_person_income = monthly_income / family_size if family_size > 0 else monthly_income
-        profile_parts.append(f"Per-Person Income: {per_person_income:,.0f} AED")
+        # Infer skills and education level from employment and income
+        skills = []
+        education_level = "high_school"  # Default assumption
         
-        # Housing Situation
-        housing_status = collected_data.get("housing_status", "unknown")
-        profile_parts.append(f"Housing Status: {housing_status.replace('_', ' ').title()}")
-        
-        # Financial Assessment
-        if eligibility_result:
-            eligible = eligibility_result.get("eligible", False)
-            support_amount = eligibility_result.get("support_amount", 0)
-            profile_parts.append(f"Support Eligibility: {'Eligible' if eligible else 'Not Eligible'}")
-            if support_amount > 0:
-                profile_parts.append(f"Approved Support: {support_amount:,.0f} AED/month")
-        
-        # Income Analysis
-        if monthly_income < 2000:
-            profile_parts.append("Income Level: Low income - needs immediate support")
-        elif monthly_income < 5000:
-            profile_parts.append("Income Level: Moderate income - opportunities for growth")
-        else:
-            profile_parts.append("Income Level: Stable income - focus on advancement")
-        
-        # Employment-specific context
-        if employment_status == "unemployed":
-            profile_parts.append("Priority: Job placement and skills development")
-        elif employment_status == "employed" and monthly_income < 3000:
-            profile_parts.append("Priority: Career advancement and income increase")
+        if employment_status == "employed":
+            if monthly_income >= 5000:
+                skills.extend(["professional_skills", "communication", "leadership"])
+                education_level = "university"
+            elif monthly_income >= 3000:
+                skills.extend(["customer_service", "computer_skills", "communication"])
+                education_level = "diploma"
+            else:
+                skills.extend(["basic_skills", "teamwork"])
+        elif employment_status == "unemployed":
+            skills.extend(["seeking_employment", "basic_skills"])
         elif employment_status == "self_employed":
-            profile_parts.append("Priority: Business development and growth")
-        elif employment_status == "retired":
-            profile_parts.append("Priority: Supplemental income and financial security")
+            skills.extend(["entrepreneurship", "business_skills", "self_management"])
+            education_level = "diploma"
         
-        return "\n".join(profile_parts)
+        # Add family-related considerations
+        if family_size > 3:
+            skills.append("time_management")
+        
+        return {
+            "employment_status": employment_status,
+            "monthly_income": monthly_income,
+            "family_size": family_size,
+            "skills": skills,
+            "education_level": education_level,
+            "work_experience_years": 2 if employment_status == "employed" else 0,
+            "looking_for": "career development, job opportunities, skills training, income improvement"
+        }
     
-    def _generate_fallback_economic_recommendations(self, employment_status: str, monthly_income: float) -> str:
-        """Generate fallback recommendations when LLM is unavailable"""
+    def _format_training_programs_for_llm(self, training_programs: List[Dict]) -> str:
+        """Format training programs for LLM context"""
+        
+        if not training_programs:
+            return "No specific training programs available in database."
+        
+        formatted = ""
+        for i, program in enumerate(training_programs[:5], 1):  # Top 5
+            metadata = program.get("metadata", {})
+            program_name = metadata.get("program_name", "Unknown Program")
+            duration = metadata.get("duration", "Unknown duration")
+            cost = metadata.get("cost", "Unknown cost")
+            skills = metadata.get("skills", "")
+            relevance = program.get("relevance_score", 0)
+            
+            formatted += f"{i}. {program_name} ({duration}, {cost}) - Relevance: {relevance:.2f}\n"
+            if skills:
+                formatted += f"   Skills: {skills}\n"
+        
+        return formatted.strip()
+    
+    def _format_job_opportunities_for_llm(self, job_opportunities: List[Dict]) -> str:
+        """Format job opportunities for LLM context"""
+        
+        if not job_opportunities:
+            return "No specific job opportunities available in database."
+        
+        formatted = ""
+        for i, job in enumerate(job_opportunities[:5], 1):  # Top 5
+            metadata = job.get("metadata", {})
+            job_title = metadata.get("job_title", "Unknown Position")
+            salary_range = metadata.get("salary_range", "Salary not specified")
+            employment_type = metadata.get("employment_type", "Unknown type")
+            requirements = metadata.get("requirements", "")
+            relevance = job.get("relevance_score", 0)
+            
+            formatted += f"{i}. {job_title} ({salary_range}, {employment_type}) - Relevance: {relevance:.2f}\n"
+            if requirements:
+                formatted += f"   Requirements: {requirements}\n"
+        
+        return formatted.strip()
+    
+    def _generate_chromadb_only_recommendations(self, training_programs: List[Dict], job_opportunities: List[Dict], collected_data: Dict) -> Dict[str, Any]:
+        """Generate recommendations using only ChromaDB data when LLM fails"""
+        
+        employment_status = collected_data.get("employment_status", "unknown")
+        monthly_income = collected_data.get("monthly_income", 0)
         
         response = "## 🚀 Economic Enablement Recommendations\n\n"
         
         if employment_status == "unemployed":
-            response += "Since you're currently unemployed, here are some opportunities:\n\n"
-            response += "**📚 Skill Development:**\n"
-            response += "• Digital literacy and computer skills training\n"
-            response += "• Language courses (English/Arabic)\n"
-            response += "• Vocational training in high-demand sectors\n\n"
-            response += "**💼 Job Search Support:**\n"
-            response += "• Resume writing and interview preparation\n"
-            response += "• Job placement assistance\n"
-            response += "• Career counseling services\n"
-        
-        elif employment_status == "employed" and monthly_income < 3000:
-            response += "To increase your income potential:\n\n"
-            response += "**📈 Career Advancement:**\n"
-            response += "• Professional certification programs\n"
-            response += "• Leadership and management training\n"
-            response += "• Industry-specific skill upgrades\n\n"
-            response += "**💰 Additional Income:**\n"
-            response += "• Part-time opportunities\n"
-            response += "• Freelancing skill development\n"
-            response += "• Small business entrepreneurship training\n"
+            response += "**Since you're currently unemployed, here are your best opportunities:**\n\n"
+            
+            # Recommend top training program
+            if training_programs:
+                top_training = training_programs[0]
+                metadata = top_training.get("metadata", {})
+                response += f"1. **{metadata.get('program_name', 'Training Program')}** ({metadata.get('duration', 'Unknown duration')})\n"
+                response += f"   - Cost: {metadata.get('cost', 'Unknown')}\n"
+                response += f"   - Contact: {metadata.get('contact', 'Contact information not available')}\n\n"
+            
+            # Recommend top job opportunity
+            if job_opportunities:
+                top_job = job_opportunities[0]
+                metadata = top_job.get("metadata", {})
+                response += f"2. **{metadata.get('job_title', 'Job Opportunity')}** ({metadata.get('salary_range', 'Salary not specified')})\n"
+                response += f"   - Type: {metadata.get('employment_type', 'Unknown')}\n"
+                response += f"   - Contact: {metadata.get('contact', 'Contact information not available')}\n\n"
+            
+            response += "3. **Apply for multiple opportunities** to increase your chances of success.\n"
+            
+        elif employment_status == "employed" and monthly_income < 4000:
+            response += "**To increase your income potential:**\n\n"
+            
+            # Recommend skill development
+            if training_programs:
+                top_training = training_programs[0]
+                metadata = top_training.get("metadata", {})
+                response += f"1. **{metadata.get('program_name', 'Skills Training')}** to enhance your qualifications\n"
+                response += f"   - Duration: {metadata.get('duration', 'Unknown')}\n"
+                response += f"   - Contact: {metadata.get('contact', 'Contact information not available')}\n\n"
+            
+            # Recommend better job opportunities
+            if job_opportunities:
+                better_jobs = [job for job in job_opportunities if "4000" in job.get("metadata", {}).get("salary_range", "") or "5000" in job.get("metadata", {}).get("salary_range", "")]
+                if better_jobs:
+                    top_job = better_jobs[0]
+                    metadata = top_job.get("metadata", {})
+                    response += f"2. **{metadata.get('job_title', 'Higher-Paying Position')}** ({metadata.get('salary_range', 'Better salary')})\n"
+                    response += f"   - Contact: {metadata.get('contact', 'Contact information not available')}\n\n"
+                else:
+                    response += "2. **Seek promotion opportunities** in your current workplace\n\n"
+            
+            response += "3. **Consider part-time opportunities** to supplement your income\n"
         
         else:
-            response += "**📚 Continuous Learning:**\n"
-            response += "• Professional development courses\n"
-            response += "• Financial literacy programs\n"
-            response += "• Investment and savings planning\n"
+            response += "**For continued growth:**\n\n"
+            response += "1. **Professional development** through available training programs\n"
+            response += "2. **Networking opportunities** in your field\n"
+            response += "3. **Financial planning** to maximize your current income\n"
         
-        response += "\n*Note: These are general recommendations. For personalized advice, please ensure the AI service is running.*"
-        
-        return response
+        return {
+            "status": "success",
+            "response": response,
+            "source": "chromadb_only",
+            "training_programs_found": len(training_programs),
+            "job_opportunities_found": len(job_opportunities)
+        }
     
     async def _explain_eligibility_decision(self, eligibility_result: Dict, collected_data: Dict) -> Dict[str, Any]:
         """Explain the eligibility decision in detail"""
@@ -896,8 +1024,8 @@ What would you like to know more about?""",
             return {
                 "message": "I understand you're providing additional information. Let me continue with the next step in your application process.",
                 "state_update": {}
-            }
-    
+            } 
+
     # Helper methods for data extraction
     def _extract_full_name(self, text: str) -> str:
         """Extract full name from text"""
@@ -1160,6 +1288,43 @@ What would you like to know more about?""",
                 "support_amount": 0,
                 "reason": "Monthly income exceeds the threshold for direct financial support"
             }
+    
+    def _generate_fallback_economic_recommendations(self, employment_status: str, monthly_income: float) -> str:
+        """Generate fallback recommendations when LLM is unavailable"""
+        
+        response = "## 🚀 Economic Enablement Recommendations\n\n"
+        
+        if employment_status == "unemployed":
+            response += "Since you're currently unemployed, here are some opportunities:\n\n"
+            response += "**📚 Skill Development:**\n"
+            response += "• Digital literacy and computer skills training\n"
+            response += "• Language courses (English/Arabic)\n"
+            response += "• Vocational training in high-demand sectors\n\n"
+            response += "**💼 Job Search Support:**\n"
+            response += "• Resume writing and interview preparation\n"
+            response += "• Job placement assistance\n"
+            response += "• Career counseling services\n"
+        
+        elif employment_status == "employed" and monthly_income < 3000:
+            response += "To increase your income potential:\n\n"
+            response += "**📈 Career Advancement:**\n"
+            response += "• Professional certification programs\n"
+            response += "• Leadership and management training\n"
+            response += "• Industry-specific skill upgrades\n\n"
+            response += "**💰 Additional Income:**\n"
+            response += "• Part-time opportunities\n"
+            response += "• Freelancing skill development\n"
+            response += "• Small business entrepreneurship training\n"
+        
+        else:
+            response += "**📚 Continuous Learning:**\n"
+            response += "• Professional development courses\n"
+            response += "• Financial literacy programs\n"
+            response += "• Investment and savings planning\n"
+        
+        response += "\n*Note: These are general recommendations. For personalized advice, please ensure the AI service is running.*"
+        
+        return response
     
     async def _handle_corrections_and_navigation(
         self, user_message: str, conversation_state: Dict

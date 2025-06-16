@@ -84,7 +84,7 @@ class BaseAgent(ABC):
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json=payload,
-                timeout=120  # 2 minute timeout
+                timeout=300  # 2 minute timeout
             )
             response.raise_for_status()
             
@@ -154,7 +154,7 @@ class BaseAgent(ABC):
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json=payload,
-                timeout=180  # 3 minute timeout for vision models
+                timeout=300  # 3 minute timeout for vision models
             )
             response.raise_for_status()
             

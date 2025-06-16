@@ -1,10 +1,10 @@
 # Social Support AI Workflow
 
-An AI-powered social support application processing system that uses conversational AI, document processing, and machine learning to assess eligibility for financial assistance and provide economic enablement recommendations.
+An AI-powered social support application processing system that uses conversational AI, document processing, machine learning, and ChromaDB vector search to assess eligibility for financial assistance and provide personalized economic enablement recommendations.
 
 ## 🎯 Overview
 
-This system provides an intelligent, conversational interface for citizens to apply for social support benefits. It combines natural language processing, computer vision for document analysis, and machine learning models to automate the eligibility assessment process while providing personalized economic enablement recommendations.
+This system provides an intelligent, conversational interface for citizens to apply for social support benefits. It combines natural language processing, computer vision for document analysis, machine learning models, and ChromaDB vector search to automate the eligibility assessment process while providing personalized economic enablement recommendations based on available training programs and job opportunities.
 
 ## 🏗️ Architecture
 
@@ -29,13 +29,13 @@ This system provides an intelligent, conversational interface for citizens to ap
                        └──────────────────┘
                                 │
                                 ▼
-                       ┌──────────────────┐
-                       │   External AI    │
-                       │                  │
-                       │ • Ollama LLM     │
-                       │ • Tesseract OCR  │
-                       │ • ML Models      │
-                       └──────────────────┘
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   External AI    │    │   ChromaDB      │
+                       │                  │    │                 │
+                       │ • Ollama LLM     │    │ • Training      │
+                       │ • Tesseract OCR  │    │   Programs      │
+                       │ • ML Models      │    │ • Job Opps      │
+                       └──────────────────┘    └─────────────────┘
 ```
 
 ### Data Flow
@@ -44,8 +44,9 @@ This system provides an intelligent, conversational interface for citizens to ap
 2. **Document Processing**: Users upload documents (Emirates ID, bank statements, etc.)
 3. **Data Extraction**: OCR + LLM extract structured data from documents
 4. **Eligibility Assessment**: ML models + rule-based logic determine eligibility
-5. **Economic Recommendations**: LLM generates personalized improvement suggestions
-6. **Database Storage**: All data and decisions are stored for audit and tracking
+5. **ChromaDB Search**: Vector search finds relevant training programs and job opportunities
+6. **Economic Recommendations**: LLM generates personalized recommendations using ChromaDB data
+7. **Database Storage**: All data and decisions are stored for audit and tracking
 
 ## 🚀 Quick Start
 
@@ -77,6 +78,7 @@ This automated script will:
 - ✅ Install frontend dependencies
 - ✅ Generate configuration files
 - ✅ Train ML models
+- ✅ Setup ChromaDB with sample training programs and job opportunities
 - ✅ Run system tests
 
 **Estimated time**: 30-60 minutes (depending on internet speed for model downloads)
@@ -131,14 +133,20 @@ If you prefer manual installation or the automated script fails, see the compreh
    python scripts/install_tesseract.py
    ```
 
-6. **Frontend Setup**
+6. **Setup ChromaDB**
+   ```bash
+   # Initialize ChromaDB with training programs and job opportunities
+   python scripts/setup_chromadb_data.py
+   ```
+
+7. **Frontend Setup**
    ```bash
    cd src/frontend
    npm install
    cd ../..
    ```
 
-7. **Configuration**
+8. **Configuration**
    ```bash
    # Copy and edit environment file
    cp .env.example .env
@@ -191,6 +199,9 @@ OLLAMA_BASE_URL=http://localhost:11434
 LLM_MODEL=llama2
 TESSERACT_PATH=/usr/bin/tesseract
 
+# ChromaDB Configuration
+CHROMADB_PERSIST_DIRECTORY=data/chroma
+
 # Security
 SECRET_KEY=your-secret-key-here
 ```
@@ -213,7 +224,7 @@ The system uses `ai_config.json` for AI model settings:
     "generation_config": {
       "temperature": 0.7,
       "max_tokens": 2048,
-      "timeout_seconds": 180
+      "timeout_seconds": 300
     }
   },
   "ocr": {
@@ -223,6 +234,14 @@ The system uses `ai_config.json` for AI model settings:
       "resize_factor": 2.0,
       "denoise": true,
       "deskew": true
+    }
+  },
+  "chromadb": {
+    "persist_directory": "data/chroma",
+    "embedding_model": "all-MiniLM-L6-v2",
+    "collections": {
+      "training_programs": "Available training and skill development programs",
+      "job_opportunities": "Job matching database for recommendations"
     }
   }
 }
@@ -256,7 +275,8 @@ During the conversation, you can upload supporting documents:
 After completing the conversation:
 - Receive eligibility decision
 - Get support amount (if eligible)
-- Access economic enablement recommendations
+- Access personalized economic enablement recommendations
+- View specific training programs and job opportunities from ChromaDB
 - Ask follow-up questions about programs
 
 ### 4. Checking Application Status
@@ -276,6 +296,9 @@ python -m pytest tests/
 
 # Run specific test file
 python -m pytest tests/test_agents.py
+
+# Test ChromaDB integration
+python test_chromadb_integration.py
 
 # Generate test data
 curl http://localhost:8000/testing/generate-synthetic-data
@@ -339,10 +362,11 @@ with open("emirates_id.jpg", "rb") as f:
    - Manages conversational flow
    - Handles user corrections and navigation
    - Generates contextual responses
+   - Integrates with ChromaDB for personalized recommendations
 
 2. **EligibilityAssessmentAgent** (`src/agents/eligibility_agent.py`)
    - Runs ML-based eligibility assessment
-   - Generates economic enablement recommendations
+   - Generates ChromaDB-enhanced economic enablement recommendations
    - Performs data validation and fraud detection
 
 3. **DataExtractionAgent** (`src/agents/data_extraction_agent.py`)
@@ -374,14 +398,45 @@ with open("emirates_id.jpg", "rb") as f:
 - Feature engineering and preprocessing
 - Model persistence and loading
 
-## 🔒 Security Considerations
+### Vector Search
 
-- Input validation and sanitization
-- File upload restrictions and scanning
-- Database query parameterization
-- API rate limiting (configurable)
-- Audit logging for all decisions
-- Data encryption in transit and at rest
+**ChromaDB Integration** (`src/services/vector_store.py`)
+- Training programs and job opportunities storage
+- Semantic similarity search for personalized matching
+- User profile-based recommendations
+- Fallback mechanisms for reliability
+
+## 🎯 Economic Enablement Features
+
+### ChromaDB-Powered Recommendations
+
+The system includes a sophisticated recommendation engine that:
+
+1. **Creates User Profiles**: Maps user data to skills, education, and preferences
+2. **Semantic Search**: Finds relevant training programs and job opportunities
+3. **Personalized Matching**: Uses vector similarity for contextual recommendations
+4. **LLM Enhancement**: Combines ChromaDB data with LLM reasoning for natural responses
+5. **Fallback Systems**: Ensures recommendations are always available
+
+### Sample Training Programs
+
+- Digital Skills Training (3 months, Free)
+- Vocational Training Certificate (6 months, Subsidized)
+- English Language Course (4 months, Free)
+- Customer Service Excellence (2 months, Free)
+- Food Safety & Hospitality (1 month, Free)
+- Basic Accounting (3 months, Subsidized)
+
+### Sample Job Opportunities
+
+- Customer Service Representative (3000-4500 AED)
+- Retail Sales Associate (2500-3500 AED)
+- Food Service Worker (2800-3200 AED)
+- Office Assistant (3200-4000 AED)
+- Warehouse Worker (2600-3400 AED)
+- Security Guard (2400-3000 AED)
+- Delivery Driver (2500-3500 AED)
+- Housekeeping Staff (2200-2800 AED)
 
 ## 📊 Monitoring and Logging
 
@@ -392,6 +447,7 @@ The system includes comprehensive logging:
 - User interactions and conversation flow
 - Document processing results
 - ML model predictions and confidence scores
+- ChromaDB search results and relevance scores
 - Error tracking and debugging information
 - Performance metrics and timing
 ```
@@ -427,9 +483,38 @@ Log files are stored in the `logs/` directory with rotation.
    brew install tesseract              # macOS
    ```
 
-4. **Frontend Build Issues**
+4. **ChromaDB Issues**
+   ```bash
+   # Reinitialize ChromaDB data
+   python scripts/setup_chromadb_data.py
+   
+   # Check ChromaDB directory
+   ls -la data/chroma/
+   ```
+
+5. **Frontend Build Issues**
    ```bash
    cd src/frontend
    rm -rf node_modules package-lock.json
    npm install
    ```
+
+## 🔄 Recent Updates
+
+### ChromaDB Integration (Latest)
+- ✅ Added vector search for training programs and job opportunities
+- ✅ Personalized recommendation engine based on user profiles
+- ✅ Semantic similarity matching for relevant suggestions
+- ✅ LLM-enhanced responses with ChromaDB context
+- ✅ Fallback mechanisms for reliability
+
+### System Improvements
+- ✅ Enhanced conversation flow with better error handling
+- ✅ Improved document processing with multiple format support
+- ✅ ML model optimization for faster predictions
+- ✅ Database schema enhancements for better tracking
+- ✅ Comprehensive logging and monitoring
+
+## 📝 License
+
+This project is developed for government use and follows applicable licensing requirements.

@@ -404,7 +404,7 @@ SECRET_KEY=your-secret-key-change-in-production-{int(time.time())}
                     "top_p": 0.9,
                     "frequency_penalty": 0.0
                 },
-                "timeout_seconds": 180,
+                "timeout_seconds": 300,
                 "retry_attempts": 3
             },
             "ocr": {
