@@ -14,10 +14,7 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
-from faker import Faker
 import uuid
-
-fake = Faker()
 
 
 class SyntheticDataGenerator:

@@ -1,19 +1,21 @@
 """
-FastAPI main application for Social Support AI Workflow
+Social Support AI Workflow - FastAPI Backend
 
-Provides REST API endpoints for:
-- Application submission
-- Document upload
-- Application processing
-- Status checking
-- Results retrieval
-- Machine Learning model operations
+FastAPI application providing RESTful APIs for conversational application processing.
+Integrates LangGraph workflow, PostgreSQL database, local LLM processing, and 
+document handling with OCR and multimodal analysis.
+
+Core endpoints: /conversation/message, /conversation/upload-document, application management.
 """
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import shutil
+import asyncio
+import json
+from pathlib import Path
+import numpy as np
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,18 +27,23 @@ from sqlalchemy.orm import Session
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+# Import logging configuration first
+from src.utils.logging_config import get_logger
+
+# Setup logging
+logger = get_logger("api_main")
+
 from config import settings, get_upload_path
 from src.models.database import get_db, Application, Document
-from src.agents.master_orchestrator import MasterOrchestrator
 from src.data.synthetic_data import SyntheticDataGenerator
+from src.agents.conversation_agent import ConversationAgent
+from src.agents.data_extraction_agent import DataExtractionAgent
+from src.agents.eligibility_agent import EligibilityAssessmentAgent
+from src.workflows.langgraph_workflow import create_conversation_workflow, ConversationState
+from src.models.database import DatabaseManager
 
-# Import ML endpoints
-try:
-    from .ml_endpoints import router as ml_router
-    ML_ENDPOINTS_AVAILABLE = True
-except ImportError:
-    ML_ENDPOINTS_AVAILABLE = False
-    print("Warning: ML endpoints not available")
+# Import routers
+from src.api.job_training_endpoints import router as job_training_router
 
 # Pydantic models for API
 class ApplicationData(BaseModel):
@@ -48,12 +55,6 @@ class ApplicationData(BaseModel):
     monthly_income: Optional[float] = None
     employment_status: Optional[str] = None
     family_size: int = 1
-    # Removed fields that don't exist in database model
-
-
-class ProcessApplicationRequest(BaseModel):
-    application_data: ApplicationData
-    use_synthetic_data: bool = False
 
 
 class ApplicationStatus(BaseModel):
@@ -63,19 +64,11 @@ class ApplicationStatus(BaseModel):
     processed_at: Optional[datetime] = None
 
 
-class ProcessingResult(BaseModel):
-    application_id: str
-    status: str
-    final_decision: dict
-    processing_summary: dict
-    workflow_state: dict
-
-
 # Initialize FastAPI app
 app = FastAPI(
-    title="Social Support AI Workflow API",
-    description="AI-powered social support application processing system with ML models",
-    version="1.0.0"
+    title="Social Support AI Workflow",
+    description="AI-powered social support application processing system",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -87,57 +80,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include ML endpoints router if available
-if ML_ENDPOINTS_AVAILABLE:
-    app.include_router(ml_router)
-
 # Initialize agents
-orchestrator = MasterOrchestrator()
 synthetic_generator = SyntheticDataGenerator()
 
+# Custom JSON encoder to handle numpy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+def convert_numpy_types(obj: Any) -> Any:
+    """Recursively convert numpy types to Python native types"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
     
     endpoints = {
-        "submit_application": "/applications/submit",
-        "upload_documents": "/applications/{application_id}/documents",
-        "process_application": "/applications/{application_id}/process",
+        "conversation_message": "/conversation/message",
+        "conversation_upload": "/conversation/upload-document",
         "get_status": "/applications/{application_id}/status",
-        "get_results": "/applications/{application_id}/results",
+        "lookup_application": "/applications/lookup",
+        "health_check": "/health",
         "generate_synthetic": "/testing/generate-synthetic-data"
     }
     
-    # Add ML endpoints if available
-    if ML_ENDPOINTS_AVAILABLE:
-        endpoints.update({
-            "ml_status": "/ml/status",
-            "ml_train": "/ml/train", 
-            "ml_predict_eligibility": "/ml/predict/eligibility",
-            "ml_predict_risk": "/ml/predict/risk",
-            "ml_predict_support": "/ml/predict/support-amount",
-            "ml_detect_fraud": "/ml/predict/fraud",
-            "ml_match_programs": "/ml/predict/programs",
-            "ml_comprehensive": "/ml/predict/comprehensive",
-            "ml_models": "/ml/models",
-            "ml_evaluate": "/ml/evaluate"
-        })
-    
     return {
-        "message": "Social Support AI Workflow API with ML Models",
-        "version": "1.0.0",
+        "message": "Social Support AI Workflow API with LangGraph",
+        "version": "2.0.0",
         "status": "running",
-        "ml_models_available": ML_ENDPOINTS_AVAILABLE,
+        "workflow_engine": "LangGraph Conversation Workflow",
         "endpoints": endpoints,
         "features": [
-            "Document processing and data extraction",
-            "Multi-modal AI agent orchestration", 
-            "Real-time eligibility assessment",
-            "Economic enablement recommendations",
-            "Scikit-learn ML classification models",
-            "Fraud detection and risk assessment",
-            "Interactive chat interface support"
+            "🔄 LangGraph-powered conversation workflow",
+            "💬 Interactive chat-based application processing",
+            "📄 Multimodal document processing and data extraction",
+            "🎯 Real-time eligibility assessment with ML models",
+            "💡 LLM-generated economic enablement recommendations",
+            "🧠 Scikit-learn ML classification models",
+            "📈 State-based conversation management"
         ]
     }
 
@@ -259,101 +261,110 @@ async def upload_documents(
         raise HTTPException(status_code=500, detail=f"Failed to upload documents: {str(e)}")
 
 
-@app.post("/applications/{application_id}/process", response_model=ProcessingResult)
+@app.post("/applications/{application_id}/process")
 async def process_application(
     application_id: str,
     db: Session = Depends(get_db)
 ):
-    """Process an application through the AI workflow"""
+    """Process an application through the AI workflow - DEPRECATED: Use conversation endpoints instead"""
+    
+    raise HTTPException(
+        status_code=410, 
+        detail="This endpoint is deprecated. Use /conversation/message for interactive processing with LangGraph workflow."
+    )
+
+
+@app.get("/applications/{application_id}/status")
+async def get_application_status(application_id: str, db: Session = Depends(get_db)):
+    """Get application status by application ID"""
+    
     try:
-        # Check if application exists
-        application = db.query(Application).filter(Application.application_id == application_id).first()
+        application = DatabaseManager.get_application_by_id(db, application_id)
+        
         if not application:
             raise HTTPException(status_code=404, detail="Application not found")
         
-        # Get application documents
-        documents = db.query(Document).filter(Document.application_id == application_id).all()
+        # Update status check tracking
+        DatabaseManager.update_status_check(db, application_id)
         
-        # Prepare application data for processing
-        application_data = {
-            "monthly_income": application.monthly_income,
-            "employment_status": application.employment_status,
-            "family_size": application.family_size
+        return {
+            "application_id": application.application_id,
+            "reference_number": application.reference_number,
+            "status": application.status.value,
+            "full_name": application.full_name,
+            "submitted_at": application.created_at.isoformat() if application.created_at else None,
+            "processed_at": application.decision_date.isoformat() if application.decision_date else None,
+            "is_eligible": application.is_eligible,
+            "support_amount": application.recommended_support_amount,
+            "last_updated": application.updated_at.isoformat() if application.updated_at else None
         }
-        
-        # Prepare document data for processing
-        document_data = [
-            {
-                "file_path": doc.file_path,
-                "document_type": doc.document_type
-            }
-            for doc in documents
-        ]
-        
-        # Prepare input for orchestrator
-        orchestrator_input = {
-            "application_data": application_data,
-            "documents": document_data,
-            "application_id": application_id
-        }
-        
-        # Update application status
-        application.status = "processing"
-        db.commit()
-        
-        # Process through orchestrator
-        result = await orchestrator.process(orchestrator_input)
-        
-        # Update application with results
-        if result["status"] == "success":
-            final_decision = result["final_decision"]
-            application.status = "completed"
-            application.processed_at = datetime.utcnow()
-            application.eligibility_score = final_decision.get("eligibility_score", 0)
-            application.is_eligible = final_decision.get("decision") == "approved"
-            application.support_amount = final_decision.get("support_amount", 0)
-            application.assessment_data = result["workflow_state"]
-        else:
-            application.status = "failed"
-            application.processed_at = datetime.utcnow()
-        
-        db.commit()
-        
-        return ProcessingResult(
-            application_id=application_id,
-            status=result["status"],
-            final_decision=result.get("final_decision", {}),
-            processing_summary=result.get("processing_summary", {}),
-            workflow_state=result.get("workflow_state", {})
-        )
         
     except Exception as e:
-        # Update application status to failed
-        application = db.query(Application).filter(Application.application_id == application_id).first()
-        if application:
-            application.status = "failed"
-            application.processed_at = datetime.utcnow()
-            db.commit()
-        
-        raise HTTPException(status_code=500, detail=f"Failed to process application: {str(e)}")
+        logger.error(f"Error getting application status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/applications/{application_id}/status", response_model=ApplicationStatus)
-async def get_application_status(
-    application_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get application status"""
-    application = db.query(Application).filter(Application.application_id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+@app.post("/applications/lookup")
+async def lookup_application(lookup_data: dict, db: Session = Depends(get_db)):
+    """Flexible application lookup using multiple methods"""
     
-    return ApplicationStatus(
-        application_id=application.application_id,
-        status=application.status,
-        submitted_at=application.submitted_at,
-        processed_at=application.processed_at
-    )
+    try:
+        application = None
+        lookup_method = None
+        
+        # Method 1: Reference Number
+        if lookup_data.get("reference_number"):
+            application = DatabaseManager.get_application_by_reference(db, lookup_data["reference_number"])
+            lookup_method = "reference_number"
+        
+        # Method 2: Emirates ID
+        elif lookup_data.get("emirates_id"):
+            application = DatabaseManager.get_application_by_emirates_id(db, lookup_data["emirates_id"])
+            lookup_method = "emirates_id"
+        
+        # Method 3: Name + Phone Last 4
+        elif lookup_data.get("name") and lookup_data.get("phone_last4"):
+            application = DatabaseManager.get_application_by_phone_and_name(
+                db, lookup_data["phone_last4"], lookup_data["name"]
+            )
+            lookup_method = "name_phone"
+        
+        # Method 4: Full Application ID (fallback)
+        elif lookup_data.get("application_id"):
+            application = DatabaseManager.get_application_by_id(db, lookup_data["application_id"])
+            lookup_method = "application_id"
+        
+        if not application:
+            return {
+                "found": False,
+                "message": "Application not found. Please check your information and try again.",
+                "lookup_method": lookup_method
+            }
+        
+        # Update status check tracking
+        DatabaseManager.update_status_check(db, application.application_id)
+        
+        return {
+            "found": True,
+            "lookup_method": lookup_method,
+            "application": {
+                "application_id": application.application_id,
+                "reference_number": application.reference_number,
+                "full_name": application.full_name,
+                "status": application.status.value,
+                "submitted_at": application.created_at.isoformat() if application.created_at else None,
+                "decision_date": application.decision_date.isoformat() if application.decision_date else None,
+                "is_eligible": application.is_eligible,
+                "support_amount": application.recommended_support_amount,
+                "eligibility_reason": application.eligibility_reason,
+                "last_status_check": application.last_status_check.isoformat() if application.last_status_check else None,
+                "status_check_count": application.status_check_count or 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in application lookup: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/applications/{application_id}/results")
@@ -380,69 +391,15 @@ async def get_application_results(
 
 @app.post("/applications/process-with-data")
 async def process_application_with_data(
-    request: ProcessApplicationRequest,
+    request: Dict[str, Any],
     db: Session = Depends(get_db)
 ):
-    """Process application with provided data (for testing/demo)"""
-    try:
-        # Generate unique application ID
-        application_id = f"APP-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8]}"
-        
-        # Create application record
-        db_application = Application(
-            application_id=application_id,
-            first_name=request.application_data.first_name,
-            last_name=request.application_data.last_name,
-            email=request.application_data.email,
-            phone=request.application_data.phone,
-            emirates_id=request.application_data.emirates_id,
-            monthly_income=request.application_data.monthly_income,
-            employment_status=request.application_data.employment_status,
-            family_size=request.application_data.family_size,
-            status="processing"
-        )
-        
-        db.add(db_application)
-        db.commit()
-        
-        # Convert pydantic model to dict
-        application_data = request.application_data.dict()
-        
-        # Process without documents for demo
-        orchestrator_input = {
-            "application_data": application_data,
-            "documents": [],  # No documents for this demo endpoint
-            "application_id": application_id
-        }
-        
-        # Process through orchestrator
-        result = await orchestrator.process(orchestrator_input)
-        
-        # Update application with results
-        if result["status"] == "success":
-            final_decision = result["final_decision"]
-            db_application.status = "completed"
-            db_application.processed_at = datetime.utcnow()
-            db_application.eligibility_score = final_decision.get("eligibility_score", 0)
-            db_application.is_eligible = final_decision.get("decision") == "approved"
-            db_application.support_amount = final_decision.get("support_amount", 0)
-            db_application.assessment_data = result["workflow_state"]
-        else:
-            db_application.status = "failed"
-            db_application.processed_at = datetime.utcnow()
-        
-        db.commit()
-        
-        return {
-            "application_id": application_id,
-            "status": result["status"],
-            "final_decision": result.get("final_decision", {}),
-            "processing_summary": result.get("processing_summary", {}),
-            "workflow_state": result.get("workflow_state", {})
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process application: {str(e)}")
+    """Process application with provided data - DEPRECATED: Use conversation endpoints instead"""
+    
+    raise HTTPException(
+        status_code=410, 
+        detail="This endpoint is deprecated. Use /conversation/message for interactive processing with LangGraph workflow."
+    )
 
 
 @app.get("/testing/generate-synthetic-data")
@@ -480,6 +437,291 @@ async def health_check():
         "version": "1.0.0"
     }
 
+
+# Add conversation endpoints
+@app.post("/conversation/message")
+async def process_conversation_message(request: Dict[str, Any]):
+    """Process a conversation message through the LangGraph workflow"""
+    
+    try:
+        user_message = request.get("message", "")
+        conversation_history = request.get("conversation_history", [])
+        conversation_state = request.get("conversation_state", {})
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        logger.info(f"Processing conversation message via LangGraph: '{user_message}'")
+        
+        # Create LangGraph workflow
+        workflow = create_conversation_workflow()
+        
+        # Convert frontend state to LangGraph state
+        langgraph_state = convert_frontend_state_to_langgraph(
+            conversation_state, 
+            conversation_history, 
+            user_message
+        )
+        
+        # Process through LangGraph workflow
+        result_state = await workflow.ainvoke(
+            langgraph_state, 
+            config={"recursion_limit": 100}  # Increased from default 25 to 100
+        )
+        
+        # Convert LangGraph state back to frontend format
+        frontend_response = convert_langgraph_state_to_frontend(result_state)
+        
+        # Convert numpy types to Python native types
+        clean_response = convert_numpy_types(frontend_response)
+        
+        logger.info(f"LangGraph workflow completed. Status: {result_state.get('processing_status')}")
+        
+        return {
+            "status": "success",
+            **clean_response
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing conversation message via LangGraph: {str(e)}")
+        
+        # Fallback to direct conversation agent if LangGraph fails
+        try:
+            logger.info("Falling back to direct conversation agent")
+            conversation_agent = ConversationAgent()
+            
+            response = await conversation_agent.process_message(
+                user_message,
+                conversation_history,
+                conversation_state
+            )
+            
+            clean_response = convert_numpy_types(response)
+            
+            return {
+                "status": "success",
+                "fallback_used": True,
+                **clean_response
+            }
+            
+        except Exception as fallback_error:
+            logger.error(f"Fallback also failed: {str(fallback_error)}")
+            raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+
+
+@app.post("/conversation/upload-document")
+async def process_conversation_document(
+    file: UploadFile = File(...),
+    file_type: str = Form(...),
+    conversation_state: str = Form("{}")
+):
+    """Process uploaded document during conversation using LangGraph workflow"""
+    
+    try:
+        logger.info(f"Document upload started via LangGraph - File: {file.filename}, Type: {file_type}, Size: {file.size}")
+        
+        # Parse conversation state
+        try:
+            state = json.loads(conversation_state) if conversation_state else {}
+            logger.info(f"Conversation state parsed successfully. Current step: {state.get('current_step', 'unknown')}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse conversation state: {str(e)}")
+            state = {}
+        
+        # Save uploaded file
+        upload_dir = "data/uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_path = os.path.join(upload_dir, file.filename)
+        logger.info(f"Saving file to: {file_path}")
+        
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+            logger.info(f"File saved successfully. Size: {len(content)} bytes")
+        
+        # Create LangGraph workflow
+        workflow = create_conversation_workflow()
+        
+        # Convert frontend state to LangGraph state and add document
+        langgraph_state = convert_frontend_state_to_langgraph(state, [], "")
+        
+        # Add uploaded document to state
+        if "uploaded_documents" not in langgraph_state:
+            langgraph_state["uploaded_documents"] = []
+        langgraph_state["uploaded_documents"].append(file_path)
+        
+        # Process through LangGraph workflow (will trigger document processing)
+        result_state = await workflow.ainvoke(
+            langgraph_state,
+            config={"recursion_limit": 100}  # Increased from default 25 to 100
+        )
+        
+        # Convert LangGraph state back to frontend format
+        frontend_response = convert_langgraph_state_to_frontend(result_state)
+        
+        # Convert numpy types to Python native types
+        clean_response = convert_numpy_types(frontend_response)
+        
+        result = {
+            "status": "success",
+            "file_path": file_path,
+            **clean_response
+        }
+        
+        logger.info(f"Document upload via LangGraph completed successfully for: {file.filename}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing document upload via LangGraph: {str(e)}", exc_info=True)
+        
+        # Fallback to direct conversation agent
+        try:
+            logger.info("Falling back to direct conversation agent for document processing")
+            conversation_agent = ConversationAgent()
+            
+            response = await conversation_agent.process_document_upload(
+                file_path,
+                file_type,
+                state
+            )
+            
+            clean_response = convert_numpy_types(response)
+            
+            return {
+                "status": "success",
+                "file_path": file_path,
+                "fallback_used": True,
+                **clean_response
+            }
+            
+        except Exception as fallback_error:
+            logger.error(f"Document processing fallback also failed: {str(fallback_error)}")
+            raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+
+
+def convert_frontend_state_to_langgraph(conversation_state: Dict, conversation_history: List[Dict], user_input: str) -> Dict:
+    """Convert frontend conversation state to LangGraph state format"""
+    
+    # Start with conversation history
+    messages = conversation_history.copy() if conversation_history else []
+    
+    # Add user input as latest message if provided
+    if user_input:
+        messages.append({
+            "role": "user",
+            "content": user_input,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    # CRITICAL FIX: Determine current step more intelligently
+    current_step = conversation_state.get("current_step")
+    processing_status = conversation_state.get("processing_status")
+    
+    # If we have an eligibility result or final decision, we should be in completion
+    if (conversation_state.get("eligibility_result") or 
+        conversation_state.get("final_decision") or 
+        processing_status in ["completed", "completion_chat"]):
+        current_step = "completion"
+        logger.info(f"🎯 State conversion: Detected completion state, setting current_step to 'completion'")
+    elif not current_step:
+        # Only default to name_collection if we truly have no state
+        current_step = "name_collection"
+        logger.info(f"🎯 State conversion: No current_step found, defaulting to 'name_collection'")
+    else:
+        logger.info(f"🎯 State conversion: Using provided current_step: '{current_step}'")
+    
+    # CRITICAL DEBUG: Log uploaded documents state
+    uploaded_docs = conversation_state.get("uploaded_documents", [])
+    logger.info(f"🔍 DEBUG: Frontend uploaded_documents: {uploaded_docs}")
+    logger.info(f"🔍 DEBUG: Frontend conversation_state keys: {list(conversation_state.keys())}")
+    
+    # Create LangGraph state
+    langgraph_state = {
+        "messages": messages,
+        "collected_data": conversation_state.get("collected_data", {}),
+        "current_step": current_step,
+        "eligibility_result": conversation_state.get("eligibility_result"),
+        "final_decision": conversation_state.get("final_decision"),
+        "uploaded_documents": uploaded_docs,
+        "workflow_history": conversation_state.get("workflow_history", []),
+        "application_id": conversation_state.get("application_id"),
+        "processing_status": processing_status or "in_progress",
+        "error_messages": conversation_state.get("error_messages", []),
+        "user_input": user_input if user_input else None,
+        "last_agent_response": None
+    }
+    
+    logger.info(f"🎯 State conversion complete: step='{current_step}', status='{processing_status}', has_eligibility={bool(conversation_state.get('eligibility_result'))}")
+    logger.info(f"🔍 DEBUG: LangGraph uploaded_documents: {langgraph_state['uploaded_documents']}")
+    
+    return langgraph_state
+
+
+def convert_langgraph_state_to_frontend(langgraph_state: Dict) -> Dict:
+    """Convert LangGraph state back to frontend response format"""
+    
+    # CRITICAL FIX: Check for last_agent_response first (used by completion chat)
+    latest_message = langgraph_state.get("last_agent_response")
+    
+    # If no last_agent_response, get the latest assistant message from messages
+    if not latest_message:
+        assistant_messages = [msg for msg in langgraph_state.get("messages", []) if msg["role"] == "assistant"]
+        latest_message = assistant_messages[-1]["content"] if assistant_messages else ""
+    
+    # CRITICAL FIX: If we still don't have a message but the application is completed,
+    # generate a completion message based on the final decision
+    if not latest_message and langgraph_state.get("processing_status") == "completed":
+        final_decision = langgraph_state.get("final_decision") or langgraph_state.get("eligibility_result")
+        if final_decision:
+            eligible = final_decision.get("eligible", False)
+            support_amount = final_decision.get("support_amount", 0)
+            
+            if eligible:
+                latest_message = f"🎉 Great news! Based on your information, you are eligible for social support. You qualify for {support_amount:,.0f} AED per month in financial assistance.\n\nYour application has been processed successfully and stored in our database. You will be contacted for final verification and to arrange support payments."
+            else:
+                reason = final_decision.get("reason", "Based on the current criteria, you don't qualify for direct financial support at this time.")
+                latest_message = f"I've completed the assessment of your application. {reason}\n\nHowever, I have economic enablement recommendations that can help improve your situation for future applications."
+            
+            logger.info(f"🎯 Generated completion message for frontend: {len(latest_message)} chars")
+    
+    # Add debugging to track which response source is used
+    response_source = "last_agent_response" if langgraph_state.get("last_agent_response") else "messages_array" if latest_message else "generated_completion"
+    logger.info(f"🎯 Frontend conversion: Using response from '{response_source}', length: {len(latest_message)} chars")
+    
+    # Prepare state update for frontend
+    state_update = {
+        "current_step": langgraph_state.get("current_step"),
+        "collected_data": langgraph_state.get("collected_data", {}),
+        "uploaded_documents": langgraph_state.get("uploaded_documents", []),
+        "eligibility_result": langgraph_state.get("eligibility_result"),
+        "final_decision": langgraph_state.get("final_decision"),
+        "application_id": langgraph_state.get("application_id"),
+        "processing_status": langgraph_state.get("processing_status")
+    }
+    
+    # Check if application is complete
+    application_complete = (
+        langgraph_state.get("processing_status") == "completed" or 
+        langgraph_state.get("current_step") == "completion"
+    )
+    
+    response = {
+        "message": latest_message,
+        "state_update": state_update,
+        "application_complete": application_complete,
+        "workflow_history": langgraph_state.get("workflow_history", []),
+        "error_messages": langgraph_state.get("error_messages", [])
+    }
+    
+    if application_complete:
+        response["final_decision"] = langgraph_state.get("final_decision") or langgraph_state.get("eligibility_result")
+    
+    return response
+
+
+# Include routers
+app.include_router(job_training_router)
 
 if __name__ == "__main__":
     import uvicorn

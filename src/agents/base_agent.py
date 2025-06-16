@@ -1,11 +1,12 @@
 """
 Base Agent class for Social Support AI Workflow
 
-Provides common functionality for all specialized AI agents including:
+Provides common functionality for all AI agents including:
 - LLM integration with Ollama
 - Logging and observability
 - Error handling
 - Performance tracking
+- Singleton pattern to prevent multiple instances
 """
 import time
 import json
@@ -21,13 +22,26 @@ from config import settings
 class BaseAgent(ABC):
     """Base class for all AI agents in the social support workflow"""
     
+    _instances = {}  # Class variable to store singleton instances
+    
+    def __new__(cls, agent_name: str = None, *args, **kwargs):
+        """Implement singleton pattern per agent class"""
+        if cls not in cls._instances:
+            cls._instances[cls] = super(BaseAgent, cls).__new__(cls)
+        return cls._instances[cls]
+    
     def __init__(self, agent_name: str, model_name: Optional[str] = None):
+        # Only initialize once per class
+        if hasattr(self, '_initialized'):
+            return
+            
         self.agent_name = agent_name
         self.model_name = model_name or settings.ollama_model
-        self.ollama_base_url = settings.ollama_base_url
+        self.ollama_url = settings.ollama_base_url
         self.performance_metrics = []
         
         logger.info(f"Initializing {agent_name} agent with model {self.model_name}")
+        self._initialized = True
     
     @abstractmethod
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,9 +82,9 @@ class BaseAgent(ABC):
             
             # Make request to Ollama
             response = requests.post(
-                f"{self.ollama_base_url}/api/generate",
+                f"{self.ollama_url}/api/generate",
                 json=payload,
-                timeout=120  # 2 minute timeout
+                timeout=300  # 2 minute timeout
             )
             response.raise_for_status()
             
@@ -138,9 +152,9 @@ class BaseAgent(ABC):
                 payload["system"] = system_prompt
             
             response = requests.post(
-                f"{self.ollama_base_url}/api/generate",
+                f"{self.ollama_url}/api/generate",
                 json=payload,
-                timeout=180  # 3 minute timeout for vision models
+                timeout=300  # 3 minute timeout for vision models
             )
             response.raise_for_status()
             

@@ -11,34 +11,56 @@ Evaluates social support applications using:
 from typing import Dict, Any, List, Optional
 import json
 from datetime import datetime
+import asyncio
 
 from .base_agent import BaseAgent
 
+# Import logging
+from src.utils.logging_config import get_logger
+logger = get_logger("eligibility_agent")
+
 # Import ML models
 try:
-    from ..models.ml_models import SocialSupportMLModels
+    import sys
+    import os
+    # Add the src directory to path
+    current_dir = os.path.dirname(__file__)  # agents directory
+    src_dir = os.path.dirname(current_dir)   # src directory
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    
+    from models.ml_models import SocialSupportMLModels
+    from models.database import get_db_session, Application, MLPrediction
     ML_MODELS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     ML_MODELS_AVAILABLE = False
-    print("Warning: ML models not available, falling back to rule-based assessment")
+    print(f"Warning: ML models not available ({str(e)}), falling back to rule-based assessment")
+
+# Import vector store separately (always needed for economic enablement)
+try:
+    from src.services.vector_store import get_vector_store
+    VECTOR_STORE_AVAILABLE = True
+except ImportError as e:
+    VECTOR_STORE_AVAILABLE = False
+    print(f"Warning: Vector store not available ({str(e)}), using fallback recommendations")
 
 
 class EligibilityAssessmentAgent(BaseAgent):
-    """Agent specialized in assessing eligibility using ML models + rule-based fallback"""
+    """
+    Eligibility Assessment Agent with ML and Rule-Based Analysis
+    
+    Performs eligibility assessment using scikit-learn ML models and rule-based logic.
+    Generates support amount predictions and economic enablement recommendations
+    via local LLM integration. Stores results in database with audit trails.
+    """
     
     def __init__(self):
         super().__init__("EligibilityAssessmentAgent")
         
-        # Initialize ML models if available
+        # Initialize ML models if available (singleton pattern - models load only once)
         if ML_MODELS_AVAILABLE:
-            self.ml_models = SocialSupportMLModels()
+            self.ml_models = SocialSupportMLModels()  # Singleton - only loads once
             self.use_ml_models = True
-            # Try to load pre-trained models
-            try:
-                self.ml_models.load_models()
-            except Exception as e:
-                print(f"Could not load pre-trained models: {e}")
-                self.use_ml_models = False
         else:
             self.ml_models = None
             self.use_ml_models = False
@@ -90,7 +112,7 @@ class EligibilityAssessmentAgent(BaseAgent):
         try:
             # Primary assessment using ML models
             if self.use_ml_models:
-                assessment_result = await self._perform_ml_eligibility_assessment(
+                assessment_result = await self._run_ml_assessment(
                     application_data, extracted_documents
                 )
             else:
@@ -99,35 +121,18 @@ class EligibilityAssessmentAgent(BaseAgent):
                     application_data, extracted_documents
                 )
             
-            # Calculate support amount if eligible
-            if assessment_result["eligible"]:
-                if self.use_ml_models:
-                    # Use ML model for support amount prediction
-                    ml_support = self.ml_models.predict_support_amount(
-                        application_data, extracted_documents
-                    )
-                    if "error" not in ml_support:
-                        assessment_result["support_calculation"] = {
-                            "monthly_support_amount": ml_support["estimated_amount"],
-                            "support_bracket": ml_support["support_bracket"],
-                            "confidence": ml_support["confidence"],
-                            "method": "ml_prediction"
-                        }
-                    else:
-                        # Fallback to rule-based calculation
-                        support_calculation = await self._calculate_support_amount_rules(
-                            application_data, extracted_documents, assessment_result
-                        )
-                        assessment_result["support_calculation"] = support_calculation
-                else:
-                    # Rule-based support calculation
-                    support_calculation = await self._calculate_support_amount_rules(
-                        application_data, extracted_documents, assessment_result
-                    )
-                    assessment_result["support_calculation"] = support_calculation
+            # Perform data validation and inconsistency detection
+            validation_result = await self._perform_data_validation(
+                application_data, extracted_documents
+            )
             
             # Generate detailed reasoning
             reasoning = await self._generate_assessment_reasoning(
+                application_data, extracted_documents, assessment_result
+            )
+            
+            # Generate economic enablement recommendations
+            enablement_recommendations = await self._generate_economic_enablement_recommendations(
                 application_data, extracted_documents, assessment_result
             )
             
@@ -135,7 +140,9 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "agent_name": self.agent_name,
                 "application_id": application_id,
                 "assessment_result": assessment_result,
+                "validation_result": validation_result,
                 "reasoning": reasoning,
+                "economic_enablement": enablement_recommendations,
                 "assessed_at": datetime.utcnow().isoformat(),
                 "assessment_method": "ml_based" if self.use_ml_models else "rule_based",
                 "status": "success"
@@ -150,80 +157,51 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "assessed_at": datetime.utcnow().isoformat()
             }
     
-    async def _perform_ml_eligibility_assessment(
+    async def _run_ml_assessment(
         self, 
         application_data: Dict[str, Any], 
         extracted_documents: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Perform ML-based eligibility assessment using multiple models
+        """Run ML-based assessment using simplified models"""
         
-        Returns:
-            Comprehensive assessment results from ML models
-        """
-        
-        # 1. Eligibility Classification
-        eligibility_prediction = self.ml_models.predict_eligibility(
-            application_data, extracted_documents
-        )
-        
-        # 2. Risk Assessment
-        risk_prediction = self.ml_models.predict_risk_level(
-            application_data, extracted_documents
-        )
-        
-        # 3. Fraud Detection
-        fraud_detection = self.ml_models.detect_fraud(
-            application_data, extracted_documents
-        )
-        
-        # 4. Economic Program Matching
-        program_matching = self.ml_models.match_economic_programs(
-            application_data, extracted_documents
-        )
-        
-        # Combine ML predictions for final eligibility decision
-        if "error" in eligibility_prediction:
-            # Fallback to rule-based if ML fails
-            return await self._perform_rule_based_eligibility_assessment(
-                application_data, extracted_documents
-            )
-        
-        # Check for fraud flags
-        is_high_fraud_risk = (
-            fraud_detection.get("risk_level") == "high" or
-            fraud_detection.get("fraud_probability", 0) > 0.8
-        )
-        
-        # Override eligibility if fraud detected
-        final_eligible = (
-            eligibility_prediction["eligible"] and 
-            not is_high_fraud_risk and
-            risk_prediction.get("risk_level") != "high"
-        )
-        
-        # Calculate confidence score
-        confidence_factors = [
-            eligibility_prediction.get("confidence", 0.5),
-            1.0 - fraud_detection.get("fraud_probability", 0.5),
-            0.8 if risk_prediction.get("risk_level") == "low" else 0.5
-        ]
-        overall_confidence = sum(confidence_factors) / len(confidence_factors)
-        
-        return {
-            "eligible": final_eligible,
-            "total_score": eligibility_prediction.get("probability_eligible", 0.5),
-            "confidence": overall_confidence,
-            "ml_predictions": {
-                "eligibility": eligibility_prediction,
-                "risk": risk_prediction,
-                "fraud": fraud_detection,
-                "programs": program_matching
-            },
-            "assessment_method": "ml_ensemble",
-            "feature_importance": eligibility_prediction.get("feature_importance", {}),
-            "override_reasons": []
-        }
+        try:
+            # Initialize ML models (singleton)
+            ml_models = SocialSupportMLModels()
+            
+            # Run only the essential predictions
+            results = {}
+            
+            # 1. Eligibility Prediction (Essential)
+            logger.info("🤖 Running eligibility prediction...")
+            eligibility_result = ml_models.predict_eligibility(application_data, extracted_documents)
+            results["eligibility"] = eligibility_result
+            
+            # 2. Support Amount Prediction (Essential)
+            logger.info("💰 Running support amount prediction...")
+            support_result = ml_models.predict_support_amount(application_data, extracted_documents)
+            results["support_amount"] = support_result
+            
+            # Create final assessment combining both results
+            final_assessment = {
+                "eligible": eligibility_result.get("eligible", False),
+                "confidence": eligibility_result.get("confidence", 0.5),
+                "eligibility_reasoning": eligibility_result.get("reasoning", "ML-based assessment"),
+                "support_amount": support_result.get("predicted_amount", 0),
+                "support_range": support_result.get("amount_range", "Basic Support"),
+                "support_reasoning": support_result.get("reasoning", "Amount calculated based on profile"),
+                "assessment_method": "simplified_ml",
+                "models_used": ["eligibility_classifier", "support_amount_predictor"]
+            }
+            
+            logger.info(f"✅ ML Assessment completed - Eligible: {final_assessment['eligible']}, Amount: {final_assessment['support_amount']:.0f} AED")
+            
+            return final_assessment
+            
+        except Exception as e:
+            logger.error(f"Error in ML assessment: {str(e)}")
+            # Fallback to rule-based assessment
+            logger.info("🔄 Falling back to rule-based assessment...")
+            return await self._perform_rule_based_eligibility_assessment(application_data, extracted_documents)
     
     async def _perform_rule_based_eligibility_assessment(
         self, 
@@ -258,10 +236,19 @@ class EligibilityAssessmentAgent(BaseAgent):
         if not hard_constraints["passed"]:
             is_eligible = False
         
+        # Calculate support amount if eligible
+        support_amount = 0
+        if is_eligible:
+            support_calculation = await self._calculate_support_amount_rules(
+                application_data, extracted_documents, {"eligible": is_eligible}
+            )
+            support_amount = support_calculation.get("monthly_support_amount", 0)
+        
         return {
             "eligible": is_eligible,
             "total_score": round(total_score, 3),
             "minimum_required_score": self.thresholds["minimum_score"],
+            "support_amount": support_amount,  # Add support amount to result
             "component_scores": {
                 "financial_need": financial_assessment,
                 "family_composition": family_assessment,
@@ -508,24 +495,48 @@ class EligibilityAssessmentAgent(BaseAgent):
         base_amount = self.support_calculation["base_amount"]
         family_size = application_data.get("family_size", 1)
         monthly_rent = application_data.get("monthly_rent", 0)
+        monthly_income = application_data.get("monthly_income", 1)
         has_medical_conditions = application_data.get("has_medical_conditions", False)
+        employment_status = application_data.get("employment_status", "unknown")
         
-        # Base calculation
+        # Base calculation - ensure minimum meaningful amount
         family_supplement = (family_size - 1) * self.support_calculation["per_dependent"]
         
-        # Housing supplement for high rent
+        # Housing supplement for high rent burden
         housing_supplement = 0
-        monthly_income = application_data.get("monthly_income", 1)
-        if monthly_rent / monthly_income > 0.4:  # High rent burden
-            housing_supplement = self.support_calculation["housing_adjustment"] * monthly_rent
+        if monthly_rent > 0 and monthly_rent / monthly_income > 0.4:  # High rent burden
+            housing_supplement = min(800, monthly_rent * 0.3)  # Cap housing supplement
         
-        # Medical supplement
+        # Medical supplement - FIXED: Use proper medical adjustment
         medical_supplement = 0
         if has_medical_conditions:
-            medical_supplement = self.support_calculation["housing_adjustment"] * monthly_rent
+            medical_supplement = 500  # Fixed medical supplement amount
+        
+        # Employment status supplement
+        employment_supplement = 0
+        if employment_status == "unemployed":
+            employment_supplement = 600
+        elif employment_status == "self_employed":
+            employment_supplement = 300
+        
+        # Income-based supplement (inverse relationship)
+        income_per_person = monthly_income / family_size
+        if income_per_person < 1000:
+            income_supplement = 800
+        elif income_per_person < 2000:
+            income_supplement = 500
+        elif income_per_person < 3000:
+            income_supplement = 300
+        else:
+            income_supplement = 0
         
         # Calculate total
-        total_support = base_amount + family_supplement + housing_supplement + medical_supplement
+        total_support = (base_amount + family_supplement + housing_supplement + 
+                        medical_supplement + employment_supplement + income_supplement)
+        
+        # Ensure minimum support for eligible applicants
+        if assessment_result.get("eligible", False):
+            total_support = max(total_support, 800)  # Minimum 800 AED for eligible applicants
         
         # Cap at maximum
         final_support = min(total_support, self.support_calculation["maximum_support"])
@@ -537,6 +548,8 @@ class EligibilityAssessmentAgent(BaseAgent):
                 "family_supplement": family_supplement,
                 "housing_supplement": housing_supplement,
                 "medical_supplement": medical_supplement,
+                "employment_supplement": employment_supplement,
+                "income_supplement": income_supplement,
                 "subtotal": total_support,
                 "final_amount": round(final_support, 2)
             },
@@ -558,17 +571,28 @@ class EligibilityAssessmentAgent(BaseAgent):
         
         task = "Generate a comprehensive assessment reasoning"
         
+        # Safely extract component scores
+        component_scores = assessment_result.get("component_scores", {})
+        if not component_scores:
+            # If no component scores, create a simplified structure
+            component_scores = {
+                "overall_assessment": {
+                    "score": assessment_result.get("total_score", 0),
+                    "assessment": "automated_evaluation"
+                }
+            }
+        
         context = {
             "application_summary": {
                 "monthly_income": application_data.get("monthly_income", 0),
                 "family_size": application_data.get("family_size", 1),
                 "employment_status": application_data.get("employment_status", "unknown"),
-                "housing_type": application_data.get("housing_type", "unknown")
+                "housing_type": application_data.get("housing_status", "unknown")
             },
             "assessment_result": {
-                "eligible": assessment_result["eligible"],
-                "total_score": assessment_result["total_score"],
-                "component_scores": assessment_result["component_scores"]
+                "eligible": assessment_result.get("eligible", False),
+                "total_score": assessment_result.get("total_score", 0),
+                "component_scores": component_scores
             },
             "support_amount": assessment_result.get("support_calculation", {}).get("monthly_support_amount", 0)
         }
@@ -620,4 +644,427 @@ class EligibilityAssessmentAgent(BaseAgent):
             "key_factors": ["Automated assessment based on eligibility criteria"],
             "summary": summary,
             "generated_by": "fallback_system"
-        } 
+        }
+
+    async def _generate_economic_enablement_recommendations(
+        self, 
+        application_data: Dict[str, Any], 
+        extracted_documents: Dict[str, Any],
+        assessment_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate ChromaDB-enhanced economic enablement recommendations"""
+        
+        try:
+            logger.info("🔍 Generating ChromaDB-enhanced economic enablement recommendations")
+            
+            # Import ConversationAgent to use its ChromaDB integration
+            from .conversation_agent import ConversationAgent
+            conversation_agent = ConversationAgent()
+            
+            # Create eligibility result format expected by ConversationAgent
+            eligibility_result = {
+                "eligible": assessment_result.get("eligible", False),
+                "support_amount": assessment_result.get("support_amount", 0),
+                "reason": assessment_result.get("reason", "Assessment completed")
+            }
+            
+            # Use ConversationAgent's ChromaDB-enhanced recommendation generation
+            llm_recommendations = await conversation_agent._generate_llm_economic_recommendations(
+                application_data, eligibility_result
+            )
+            
+            if llm_recommendations.get("status") == "success":
+                logger.info("✅ Successfully generated ChromaDB-enhanced recommendations")
+                
+                # Extract the formatted response and convert to structured format
+                recommendations_text = llm_recommendations.get("response", "")
+                
+                # Create structured response with both text and metadata
+                return {
+                    "recommendations_text": recommendations_text,  # Full formatted text for display
+                    "summary": "Personalized recommendations based on available training programs and job opportunities",
+                    "chromadb_integration": {
+                        "status": "success",
+                        "training_programs_found": llm_recommendations.get("training_programs_found", 0),
+                        "job_opportunities_found": llm_recommendations.get("job_opportunities_found", 0),
+                        "source": llm_recommendations.get("source", "chromadb_enhanced_llm")
+                    },
+                    "generated_by": "chromadb_enhanced_system"
+                }
+            else:
+                logger.warning("ChromaDB-enhanced recommendations failed, using fallback")
+                return await self._generate_fallback_recommendations(application_data, assessment_result)
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating ChromaDB-enhanced recommendations: {str(e)}")
+            # Fallback to basic recommendations if anything fails
+            return await self._generate_fallback_recommendations(application_data, assessment_result)
+    
+    async def _generate_fallback_recommendations(
+        self, 
+        application_data: Dict[str, Any], 
+        assessment_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate fallback recommendations if ChromaDB integration fails"""
+        
+        logger.warning("Using fallback recommendations due to ChromaDB integration failure")
+        
+        # Basic fallback recommendations (original static ones)
+        recommendations = []
+        
+        # Basic training programs
+        training_programs = [
+           {
+               "name": "Digital Skills Training Program",
+               "duration": "3 months",
+               "description": "Learn essential computer skills, Microsoft Office, and basic digital literacy",
+               "provider": "UAE Digital Skills Academy",
+               "cost": "Free for eligible applicants",
+               "contact": "800-SKILLS",
+               "source": "fallback"
+           },
+           {
+               "name": "Vocational Training Certificate",
+               "duration": "6 months", 
+               "description": "Hands-on training in trades like plumbing, electrical work, or automotive repair",
+               "provider": "Technical Education Institute",
+               "cost": "Subsidized for low-income families",
+               "contact": "04-123-4567",
+               "source": "fallback"
+           }
+        ]
+        
+        # Basic job opportunities
+        job_opportunities = [
+           {
+               "title": "Customer Service Representative",
+               "company": "Various Companies",
+               "salary_range": "3000-4500 AED",
+               "requirements": "Basic English, computer skills",
+               "contact": "UAE Employment Center - 800-JOBS",
+               "source": "fallback"
+           },
+           {
+               "title": "Retail Sales Associate", 
+               "company": "Shopping Centers",
+               "salary_range": "2500-3500 AED",
+               "requirements": "Customer service skills, flexible schedule",
+               "contact": "Retail Jobs Portal - jobs.uae.gov",
+               "source": "fallback"
+           }
+        ]
+        
+        if assessment_result["eligible"]:
+            recommendations.extend([
+               "✅ **Immediate Support**: You qualify for monthly financial assistance.",
+               "📚 **Skill Development**: Enroll in training programs to improve job prospects.",
+               "💼 **Job Search**: Register with employment services for job matching.",
+               "💰 **Financial Planning**: Attend financial literacy workshops.",
+               "🎯 **Career Counseling**: Get professional guidance for career development."
+            ])
+            
+            summary = "🎉 **Good news!** You qualify for social support. Use this opportunity to build skills and work toward economic independence."
+        else:
+            recommendations.extend([
+               "📚 **Skill Enhancement**: Focus on developing marketable skills through training programs.",
+               "💼 **Job Search Assistance**: Use employment services to find better opportunities.", 
+               "🎯 **Career Counseling**: Get professional guidance to improve employment prospects.",
+               "💰 **Financial Planning**: Learn budgeting and financial management skills.",
+               "🔄 **Reapply Later**: Consider reapplying after improving your situation."
+            ])
+            
+            summary = "While you don't qualify for direct support currently, there are resources available to help improve your situation."
+        
+        return {
+            "recommendations": recommendations,
+            "training_programs": training_programs,
+            "job_opportunities": job_opportunities, 
+            "counseling_services": self._get_default_counseling_services(),
+            "financial_programs": self._get_default_financial_programs(),
+            "summary": summary,
+            "chromadb_integration": {
+                "status": "failed",
+                "fallback_used": True
+            },
+            "generated_by": "fallback_system"
+        }
+    
+    def _get_default_counseling_services(self) -> List[Dict[str, Any]]:
+        """Get default counseling services"""
+        return [
+           {
+               "service": "Career Assessment & Planning",
+               "provider": "UAE Career Development Center",
+               "description": "Professional assessment to identify strengths and career paths",
+               "cost": "Free consultation",
+               "contact": "800-CAREER"
+           },
+           {
+               "service": "Resume Writing Workshop",
+               "provider": "Employment Support Services",
+               "description": "Learn to create professional resumes and cover letters",
+               "cost": "Free",
+               "contact": "career.support@uae.gov"
+           }
+        ]
+    
+    def _get_default_financial_programs(self) -> List[Dict[str, Any]]:
+        """Get default financial programs"""
+        return [
+           {
+               "program": "Personal Finance Management",
+               "provider": "UAE Financial Literacy Center",
+               "description": "Learn budgeting, saving, and financial planning skills",
+               "duration": "2 months",
+               "cost": "Free",
+               "contact": "finance.education@uae.gov"
+           },
+           {
+               "program": "Small Business Development",
+               "provider": "Entrepreneurship Support Center",
+               "description": "Training for starting and managing small businesses",
+               "duration": "3 months",
+               "cost": "Subsidized",
+               "contact": "800-BUSINESS"
+           }
+        ]
+    
+    async def _perform_data_validation(
+        self, 
+        application_data: Dict[str, Any], 
+        extracted_documents: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Perform comprehensive data validation and inconsistency detection
+        Addresses the problem statement requirements for:
+        - Manual Data Gathering errors
+        - Semi-Automated Data Validations
+        - Inconsistent Information detection
+        """
+        
+        validation_issues = []
+        inconsistencies = []
+        confidence_score = 1.0
+        
+        # 1. Basic Field Validation
+        required_fields = ["name", "emirates_id", "monthly_income", "family_size"]
+        for field in required_fields:
+            if not application_data.get(field):
+                validation_issues.append(f"Missing required field: {field}")
+                confidence_score -= 0.1
+        
+        # 2. Emirates ID Format Validation
+        emirates_id = application_data.get("emirates_id", "")
+        if emirates_id and not self._validate_emirates_id_format(emirates_id):
+            validation_issues.append("Invalid Emirates ID format")
+            confidence_score -= 0.15
+        
+        # 3. Income Validation and Cross-checking
+        stated_income = application_data.get("monthly_income", 0)
+        bank_statement_data = extracted_documents.get("bank_statement", {})
+        
+        if bank_statement_data and "monthly_income" in bank_statement_data:
+            bank_income = bank_statement_data["monthly_income"]
+            income_difference = abs(stated_income - bank_income) / max(stated_income, bank_income, 1)
+            
+            if income_difference > 0.2:  # More than 20% difference
+                inconsistencies.append({
+                    "type": "income_mismatch",
+                    "description": f"Stated income ({stated_income:,.0f} AED) differs significantly from bank statement ({bank_income:,.0f} AED)",
+                    "severity": "high" if income_difference > 0.5 else "medium",
+                    "difference_percentage": income_difference * 100
+                })
+                confidence_score -= 0.2 if income_difference > 0.5 else 0.1
+        
+        # 4. Employment Status Cross-validation
+        stated_employment = application_data.get("employment_status", "")
+        resume_data = extracted_documents.get("resume", {})
+        
+        if resume_data and "current_employment_status" in resume_data:
+            resume_employment = resume_data["current_employment_status"]
+            if stated_employment != resume_employment:
+                inconsistencies.append({
+                    "type": "employment_mismatch",
+                    "description": f"Stated employment status ({stated_employment}) differs from resume ({resume_employment})",
+                    "severity": "medium"
+                })
+                confidence_score -= 0.1
+        
+        # 5. Address Consistency Check
+        stated_address = application_data.get("address", "")
+        emirates_id_data = extracted_documents.get("emirates_id", {})
+        credit_report_data = extracted_documents.get("credit_report", {})
+        
+        addresses_to_check = []
+        if emirates_id_data.get("address"):
+            addresses_to_check.append(("Emirates ID", emirates_id_data["address"]))
+        if credit_report_data.get("address"):
+            addresses_to_check.append(("Credit Report", credit_report_data["address"]))
+        
+        for source, address in addresses_to_check:
+            if stated_address and address and not self._addresses_match(stated_address, address):
+                inconsistencies.append({
+                    "type": "address_mismatch",
+                    "description": f"Address from {source} doesn't match stated address",
+                    "severity": "medium"
+                })
+                confidence_score -= 0.1
+        
+        # 6. Family Size Validation
+        stated_family_size = application_data.get("family_size", 0)
+        if stated_family_size < 1 or stated_family_size > 15:
+            validation_issues.append(f"Unusual family size: {stated_family_size}")
+            confidence_score -= 0.1
+        
+        # 7. Income vs Family Size Reasonableness Check
+        if stated_income > 0 and stated_family_size > 0:
+            per_person_income = stated_income / stated_family_size
+            if per_person_income > 10000:  # Very high per-person income
+                validation_issues.append("Income appears unusually high for family size")
+                confidence_score -= 0.05
+            elif per_person_income < 100:  # Very low per-person income
+                validation_issues.append("Income appears unusually low - may need verification")
+                confidence_score -= 0.05
+        
+        # 8. Document Quality Assessment
+        document_quality_issues = []
+        for doc_type, doc_data in extracted_documents.items():
+            if doc_data.get("extraction_confidence", 1.0) < 0.7:
+                document_quality_issues.append(f"Low confidence in {doc_type} extraction")
+                confidence_score -= 0.05
+        
+        # 9. Fraud Risk Indicators
+        fraud_indicators = []
+        
+        # Check for duplicate applications (simplified)
+        if self._check_potential_duplicate(application_data):
+            fraud_indicators.append("Potential duplicate application detected")
+            confidence_score -= 0.3
+        
+        # Check for suspicious patterns
+        if self._check_suspicious_patterns(application_data, extracted_documents):
+            fraud_indicators.append("Suspicious data patterns detected")
+            confidence_score -= 0.2
+        
+        # Calculate overall validation status
+        total_issues = len(validation_issues) + len(inconsistencies) + len(fraud_indicators)
+        
+        if total_issues == 0:
+            validation_status = "passed"
+        elif total_issues <= 2 and not fraud_indicators:
+            validation_status = "passed_with_warnings"
+        elif total_issues <= 4 and confidence_score > 0.6:
+            validation_status = "requires_review"
+        else:
+            validation_status = "failed"
+        
+        return {
+            "validation_status": validation_status,
+            "confidence_score": max(0.0, confidence_score),
+            "validation_issues": validation_issues,
+            "inconsistencies": inconsistencies,
+            "document_quality_issues": document_quality_issues,
+            "fraud_indicators": fraud_indicators,
+            "total_issues": total_issues,
+            "recommendations": self._generate_validation_recommendations(
+                validation_status, validation_issues, inconsistencies, fraud_indicators
+            )
+        }
+    
+    def _validate_emirates_id_format(self, emirates_id: str) -> bool:
+        """Validate Emirates ID format (XXX-XXXX-XXXXXXX-X)"""
+        import re
+        pattern = r'^\d{3}-\d{4}-\d{7}-\d{1}$'
+        return bool(re.match(pattern, emirates_id))
+    
+    def _addresses_match(self, addr1: str, addr2: str) -> bool:
+        """Check if two addresses are similar (simplified matching)"""
+        if not addr1 or not addr2:
+            return False
+        
+        # Normalize addresses for comparison
+        addr1_norm = addr1.lower().replace(",", "").replace(".", "").strip()
+        addr2_norm = addr2.lower().replace(",", "").replace(".", "").strip()
+        
+        # Simple similarity check - in production, use more sophisticated matching
+        common_words = set(addr1_norm.split()) & set(addr2_norm.split())
+        total_words = set(addr1_norm.split()) | set(addr2_norm.split())
+        
+        if len(total_words) == 0:
+            return False
+        
+        similarity = len(common_words) / len(total_words)
+        return similarity > 0.6  # 60% similarity threshold
+    
+    def _check_potential_duplicate(self, application_data: Dict[str, Any]) -> bool:
+        """Check for potential duplicate applications (simplified)"""
+        # In production, this would check against a database of previous applications
+        # For now, return False (no duplicates detected)
+        return False
+    
+    def _check_suspicious_patterns(self, application_data: Dict[str, Any], extracted_documents: Dict[str, Any]) -> bool:
+        """Check for suspicious data patterns that might indicate fraud"""
+        
+        suspicious_indicators = 0
+        
+        # Check for round numbers (might indicate fabricated data)
+        income = application_data.get("monthly_income", 0)
+        if income > 0 and income % 1000 == 0 and income > 2000:
+            suspicious_indicators += 1
+        
+        # Check for inconsistent document timestamps (if available)
+        doc_dates = []
+        for doc_data in extracted_documents.values():
+            if "document_date" in doc_data:
+                doc_dates.append(doc_data["document_date"])
+        
+        # If documents are from very different time periods, it might be suspicious
+        if len(doc_dates) > 1:
+            # Simplified check - in production, use proper date parsing
+            pass
+        
+        # Check for unusual combinations
+        employment_status = application_data.get("employment_status", "")
+        if employment_status == "unemployed" and income > 5000:
+            suspicious_indicators += 1
+        
+        return suspicious_indicators >= 2
+    
+    def _generate_validation_recommendations(
+        self, 
+        validation_status: str, 
+        validation_issues: List[str], 
+        inconsistencies: List[Dict], 
+        fraud_indicators: List[str]
+    ) -> List[str]:
+        """Generate recommendations based on validation results"""
+        
+        recommendations = []
+        
+        if validation_status == "failed":
+            recommendations.append("Application requires manual review before processing")
+            recommendations.append("Verify all submitted documents and information")
+        
+        elif validation_status == "requires_review":
+            recommendations.append("Recommend manual verification of flagged inconsistencies")
+            recommendations.append("Consider requesting additional documentation")
+        
+        elif validation_status == "passed_with_warnings":
+            recommendations.append("Minor issues detected - proceed with standard processing")
+            recommendations.append("Monitor for any additional red flags")
+        
+        else:  # passed
+            recommendations.append("All validations passed - proceed with automated processing")
+        
+        # Specific recommendations based on issues
+        if any("income" in issue.lower() for issue in validation_issues):
+            recommendations.append("Request additional income verification documents")
+        
+        if inconsistencies:
+            recommendations.append("Clarify inconsistencies with applicant before final decision")
+        
+        if fraud_indicators:
+            recommendations.append("Escalate to fraud investigation team")
+            recommendations.append("Do not process until fraud concerns are resolved")
+        
+        return recommendations 

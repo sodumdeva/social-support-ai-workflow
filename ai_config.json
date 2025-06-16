@@ -1,0 +1,54 @@
+{
+  "ai_environment": {
+    "setup_date": "2025-06-12 14:47:16",
+    "ollama_url": "http://localhost:11434",
+    "models_directory": "models/",
+    "primary_model": "llama2"
+  },
+  "llm_models": {
+    "conversation": "llama2",
+    "data_extraction": "codellama",
+    "reasoning": "mistral",
+    "fallback": "phi"
+  },
+  "ml_models": {
+    "eligibility_classifier": "models/eligibility_classifier.pkl",
+    "support_regressor": "models/support_amount_regressor.pkl",
+    "risk_classifier": "models/risk_classifier.pkl",
+    "conversation_classifier": "models/conversation_classifier.pkl"
+  },
+  "model_settings": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 1000,
+    "timeout": 300
+  },
+  "available_models": [
+    "phi",
+    "mistral",
+    "codellama",
+    "llama2"
+  ],
+  "model_info": {
+    "llama2": {
+      "description": "Primary conversational model for user interaction",
+      "use_case": "conversation, intent analysis, response generation",
+      "size": "3.8GB"
+    },
+    "codellama": {
+      "description": "Specialized model for structured data extraction",
+      "use_case": "data extraction, JSON parsing, structured output",
+      "size": "3.8GB"
+    },
+    "mistral": {
+      "description": "Advanced reasoning model for complex decisions",
+      "use_case": "eligibility reasoning, complex analysis",
+      "size": "4.1GB"
+    },
+    "phi": {
+      "description": "Lightweight model for quick responses",
+      "use_case": "simple queries, fallback responses",
+      "size": "1.6GB"
+    }
+  }
+}
